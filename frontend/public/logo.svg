@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
+  <!-- Background -->
+  <rect width="400" height="120" fill="none"/>
+  
+  <!-- Bridge Icon -->
+  <g transform="translate(20, 30)">
+    <!-- Left pillar -->
+    <rect x="0" y="25" width="8" height="35" fill="#2563eb" rx="2"/>
+    <!-- Right pillar -->
+    <rect x="52" y="25" width="8" height="35" fill="#2563eb" rx="2"/>
+    
+    <!-- Bridge arch -->
+    <path d="M 4 25 Q 30 5, 56 25" stroke="#0ea5e9" stroke-width="8" fill="none" stroke-linecap="round"/>
+    
+    <!-- Medical cross on bridge -->
+    <g transform="translate(30, 18)">
+      <rect x="-2" y="-8" width="4" height="16" fill="#10b981" rx="1"/>
+      <rect x="-6" y="-4" width="12" height="4" fill="#10b981" rx="1"/>
+    </g>
+    
+    <!-- Connection dots -->
+    <circle cx="-8" cy="35" r="4" fill="#0ea5e9" opacity="0.6"/>
+    <circle cx="68" cy="35" r="4" fill="#0ea5e9" opacity="0.6"/>
+    
+    <!-- Document icon (left side) -->
+    <g transform="translate(-15, 32)">
+      <rect x="0" y="0" width="10" height="14" fill="#94a3b8" rx="1"/>
+      <line x1="2" y1="4" x2="8" y2="4" stroke="white" stroke-width="1"/>
+      <line x1="2" y1="7" x2="8" y2="7" stroke="white" stroke-width="1"/>
+      <line x1="2" y1="10" x2="6" y2="10" stroke="white" stroke-width="1"/>
+    </g>
+    
+    <!-- Patient icon (right side) -->
+    <g transform="translate(65, 32)">
+      <circle cx="5" cy="3" r="3" fill="#94a3b8"/>
+      <path d="M 0 14 Q 0 8, 5 8 Q 10 8, 10 14 Z" fill="#94a3b8"/>
+    </g>
+  </g>
+  
+  <!-- Text: PatientBridge -->
+  <text x="110" y="55" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#1e293b">
+    Patient<tspan fill="#2563eb">Bridge</tspan>
+  </text>
+  
+  <!-- Tagline -->
+  <text x="110" y="78" font-family="Arial, sans-serif" font-size="13" fill="#64748b" letter-spacing="0.5">
+    Connecting Care, Streamlining Workflow
+  </text>
+</svg>
