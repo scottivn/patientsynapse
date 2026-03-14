@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 
 from server.config import get_settings
 from server.api.routes import router
+from server.emr import get_emr
 from server.auth.smart import SMARTAuth
 
 logging.basicConfig(
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    logger.info(f"PatientBridge starting | env={settings.app_env} | llm={settings.llm_provider}")
-    logger.info(f"FHIR base: {settings.ecw_fhir_base_url}")
+    emr = get_emr()
+    logger.info(f"PatientBridge starting | env={settings.app_env} | emr={emr.name} | llm={settings.llm_provider}")
+    logger.info(f"FHIR base: {emr.fhir_base_url}")
 
     # Ensure upload dir exists
     Path(settings.fax_upload_dir).mkdir(parents=True, exist_ok=True)
@@ -35,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PatientBridge",
-    description="Intelligent referral processing, scheduling, and RCM for eCW practices",
+    description="Intelligent referral processing, scheduling, and RCM for medical practices",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -55,7 +57,8 @@ app.include_router(router)
 # JWKS endpoint for SMART on FHIR
 @app.get("/.well-known/jwks.json")
 async def jwks():
-    auth = SMARTAuth()
+    emr = get_emr()
+    auth = SMARTAuth(emr)
     return auth.get_jwks()
 
 # Serve frontend (production build)

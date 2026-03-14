@@ -1,4 +1,4 @@
-"""High-level FHIR resource operations for eCW."""
+"""High-level FHIR resource operations — EMR-agnostic."""
 
 import base64
 import logging

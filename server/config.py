@@ -7,13 +7,24 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # eCW FHIR
+    # EMR provider selector: ecw | athena
+    emr_provider: Literal["ecw", "athena"] = "ecw"
+    emr_redirect_uri: str = Field(default="https://localhost:8443/api/auth/callback")
+
+    # eCW-specific settings (used when emr_provider=ecw)
     ecw_fhir_base_url: str = Field(default="https://localhost/fhir/r4/practice")
     ecw_client_id: str = Field(default="")
     ecw_jwks_url: str = Field(default="https://localhost:8443/.well-known/jwks.json")
-    ecw_redirect_uri: str = Field(default="https://localhost:8443/auth/callback")
     ecw_token_url: str = Field(default="")
     ecw_authorize_url: str = Field(default="")
+
+    # Athena-specific settings (used when emr_provider=athena)
+    athena_fhir_base_url: str = Field(default="https://api.platform.athenahealth.com/fhir/r4")
+    athena_client_id: str = Field(default="")
+    athena_client_secret: str = Field(default="")
+    athena_authorize_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/authorize")
+    athena_token_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/token")
+    athena_practice_id: str = Field(default="")
 
     # LLM
     llm_provider: Literal["grok", "openai", "anthropic", "ollama"] = "grok"

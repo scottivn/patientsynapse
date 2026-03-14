@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from server.services.referral import ReferralService, ReferralStatus
 from server.services.ocr import extract_text_from_pdf, extract_text_from_image
+from server.emr import get_emr
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -44,15 +45,17 @@ def get_referral_service() -> ReferralService:
 async def auth_status():
     """Check if FHIR OAuth is active."""
     from server.auth.smart import SMARTAuth
-    auth = SMARTAuth()
-    return {"authenticated": auth.is_authenticated}
+    emr = get_emr()
+    auth = SMARTAuth(emr)
+    return {"authenticated": auth.is_authenticated, "emr_provider": emr.name, "fhir_base_url": emr.fhir_base_url}
 
 
 @router.get("/auth/login")
 async def auth_login():
     """Get the OAuth authorization URL to start SMART on FHIR flow."""
     from server.auth.smart import SMARTAuth
-    auth = SMARTAuth()
+    emr = get_emr()
+    auth = SMARTAuth(emr)
     url = auth.get_authorize_url()
     return {"authorize_url": url}
 
@@ -61,10 +64,11 @@ async def auth_login():
 async def auth_callback(code: str, state: Optional[str] = None):
     """Handle OAuth callback with authorization code."""
     from server.auth.smart import SMARTAuth
-    auth = SMARTAuth()
+    emr = get_emr()
+    auth = SMARTAuth(emr)
     try:
         token = await auth.exchange_code(code)
-        return {"status": "authenticated", "scope": token.scope}
+        return {"status": "authenticated", "emr": emr.name, "scope": token.scope}
     except Exception as e:
         raise HTTPException(400, f"Token exchange failed: {str(e)}")
 
@@ -173,12 +177,13 @@ async def patient_billing(patient_id: str):
 @router.get("/rcm/dashboard")
 async def rcm_dashboard():
     """Get RCM dashboard summary."""
+    emr = get_emr()
     return {
         "total_referrals": 0,
         "pending_review": 0,
         "completed_today": 0,
         "revenue_this_month": 0,
-        "message": "Connect to eCW for live data",
+        "message": f"Connect to {emr.name} for live data",
     }
 
 
@@ -189,8 +194,11 @@ async def system_status():
     """System health check."""
     from server.config import get_settings
     settings = get_settings()
+    emr = get_emr()
     return {
         "status": "running",
+        "emr_provider": emr.name,
+        "emr_provider_key": settings.emr_provider,
         "llm_provider": settings.llm_provider,
         "fhir_connected": _referral_service is not None,
         "app_env": settings.app_env,

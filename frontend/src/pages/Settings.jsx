@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Save, RefreshCw, CheckCircle2, XCircle, ExternalLink, Shield, Cpu, Server } from 'lucide-react'
+import { Save, RefreshCw, CheckCircle2, XCircle, ExternalLink, Shield, Cpu, Server, Building2 } from 'lucide-react'
 import { getAuthStatus, getStatus, loginAuth } from '../services/api'
+
+const EMR_OPTIONS = [
+  { value: 'ecw', label: 'eClinicalWorks', desc: 'SMART on FHIR, asymmetric JWT auth' },
+  { value: 'athena', label: 'athenahealth', desc: 'SMART on FHIR, client secret auth' },
+]
 
 const LLM_OPTIONS = [
   { value: 'grok', label: 'Grok (X.AI)', desc: 'Default — fast, cost-effective' },
@@ -37,15 +42,46 @@ export default function Settings() {
 
   const connected = auth?.authenticated === true
 
+  const emrName = status?.emr_provider || auth?.emr_provider || 'EMR'
+
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
-      {/* eCW Connection */}
+      {/* EMR Provider */}
+      <div className="card">
+        <div className="flex items-center gap-2 mb-5">
+          <Building2 size={18} className="text-brand-500" />
+          <h2 className="font-semibold text-gray-900">EMR Provider</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          The active EMR is controlled via the <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">EMR_PROVIDER</code> environment variable.
+          Restart the server after changing it.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {EMR_OPTIONS.map((opt) => {
+            const active = status?.emr_provider_key === opt.value
+            return (
+              <div
+                key={opt.value}
+                className={`border rounded-lg px-4 py-3 ${active ? 'border-brand-400 bg-brand-50' : 'border-gray-200'}`}
+              >
+                <div className="flex items-center justify-between">
+                  <p className={`font-medium text-sm ${active ? 'text-brand-700' : 'text-gray-700'}`}>{opt.label}</p>
+                  {active && <span className="badge-success text-xs">Active</span>}
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">{opt.desc}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* FHIR Connection */}
       <div className="card">
         <div className="flex items-center gap-2 mb-5">
           <Shield size={18} className="text-brand-500" />
-          <h2 className="font-semibold text-gray-900">eCW FHIR Connection</h2>
+          <h2 className="font-semibold text-gray-900">{emrName} FHIR Connection</h2>
         </div>
 
         <div className="flex items-center gap-4 mb-5">
@@ -62,7 +98,7 @@ export default function Settings() {
           )}
           <button onClick={handleLogin} className="btn-primary text-sm flex items-center gap-2">
             <ExternalLink size={14} />
-            {connected ? 'Reconnect' : 'Connect to eCW'}
+            {connected ? 'Reconnect' : `Connect to ${emrName}`}
           </button>
         </div>
 
@@ -142,11 +178,15 @@ export default function Settings() {
               </tr>
             </thead>
             <tbody className="text-gray-600">
-              <EnvRow name="ECW_FHIR_BASE_URL" desc="eCW FHIR R4 base URL" />
-              <EnvRow name="ECW_CLIENT_ID" desc="SMART on FHIR client ID (from eCW developer portal)" />
-              <EnvRow name="ECW_REDIRECT_URI" desc="OAuth2 callback URL (default: https://localhost:8443/api/auth/callback)" />
+              <EnvRow name="EMR_PROVIDER" desc="ecw | athena" />
+              <EnvRow name="EMR_REDIRECT_URI" desc="OAuth2 callback URL (default: https://localhost:8443/api/auth/callback)" />
+              <EnvRow name="ECW_FHIR_BASE_URL" desc="eCW FHIR R4 base URL (when using ecw)" />
+              <EnvRow name="ECW_CLIENT_ID" desc="eCW SMART on FHIR client ID" />
+              <EnvRow name="ATHENA_FHIR_BASE_URL" desc="Athena FHIR R4 base URL (when using athena)" />
+              <EnvRow name="ATHENA_CLIENT_ID" desc="Athena OAuth2 client ID" />
+              <EnvRow name="ATHENA_CLIENT_SECRET" desc="Athena OAuth2 client secret" />
               <EnvRow name="LLM_PROVIDER" desc="grok | openai | anthropic | ollama" />
-              <EnvRow name="GROK_API_KEY" desc="X.AI API key (when using Grok)" />
+              <EnvRow name="XAI_API_KEY" desc="X.AI API key (when using Grok)" />
               <EnvRow name="OPENAI_API_KEY" desc="OpenAI API key (when using OpenAI)" />
               <EnvRow name="ANTHROPIC_API_KEY" desc="Anthropic API key (when using Anthropic)" />
               <EnvRow name="OLLAMA_BASE_URL" desc="Ollama server URL (default: http://localhost:11434)" />

@@ -1,4 +1,4 @@
-"""Base FHIR R4 HTTP client for eClinicalWorks."""
+"""Base FHIR R4 HTTP client — EMR-agnostic."""
 
 import logging
 import httpx
@@ -18,7 +18,7 @@ class FHIRClient:
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                base_url=self.auth.settings.ecw_fhir_base_url,
+                base_url=self.auth.emr.fhir_base_url,
                 timeout=30.0,
             )
         return self._client

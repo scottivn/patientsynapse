@@ -20,6 +20,7 @@ async function request(path, options = {}) {
 // Auth
 export const getAuthStatus = () => request('/auth/status');
 export const getLoginUrl = () => request('/auth/login');
+export const loginAuth = getLoginUrl;
 
 // Referrals
 export const uploadReferralFile = async (file) => {
@@ -66,3 +67,4 @@ export const getPatientBilling = (patientId) => request(`/rcm/patient/${patientI
 
 // System
 export const getSystemStatus = () => request('/status');
+export const getStatus = getSystemStatus;

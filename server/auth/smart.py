@@ -1,4 +1,4 @@
-"""SMART on FHIR OAuth2 authentication for eCW."""
+"""SMART on FHIR OAuth2 authentication — EMR-agnostic."""
 
 import time
 import json
@@ -10,7 +10,8 @@ from cryptography.hazmat.primitives import serialization
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
-from server.config import get_settings
+
+from server.emr.base import EMRProvider, AuthMethod
 
 
 @dataclass
@@ -29,50 +30,29 @@ class TokenSet:
 
 
 class SMARTAuth:
-    """SMART on FHIR standalone launch with asymmetric key auth."""
+    """SMART on FHIR standalone launch — supports both asymmetric JWT
+    and client-secret auth depending on the EMR provider."""
 
-    SCOPES = [
-        "openid",
-        "fhirUser",
-        "offline_access",
-        # Read scopes
-        "user/Patient.read",
-        "user/Condition.read",
-        "user/Coverage.read",
-        "user/Encounter.read",
-        "user/DocumentReference.read",
-        "user/ServiceRequest.read",
-        "user/Practitioner.read",
-        "user/PractitionerRole.read",
-        "user/Location.read",
-        "user/Organization.read",
-        "user/Procedure.read",
-        "user/Provenance.read",
-        # Write scopes
-        "user/Patient.write",
-        "user/Condition.write",
-        "user/DocumentReference.write",
-        "user/ServiceRequest.write",
-        "user/Encounter.write",
-        "user/Task.write",
-        "user/Communication.write",
-    ]
-
-    def __init__(self):
-        self.settings = get_settings()
+    def __init__(self, emr: EMRProvider):
+        self.emr = emr
         self._token: Optional[TokenSet] = None
         self._key_path = Path("keys")
         self._key_path.mkdir(exist_ok=True)
-        self._private_key = self._load_or_generate_key()
+        # Only load/generate RSA key when using JWT auth
+        self._private_key = (
+            self._load_or_generate_key()
+            if emr.auth_method == AuthMethod.ASYMMETRIC_JWT
+            else None
+        )
+
+    # ---- Key management (asymmetric JWT auth only) ----
 
     def _load_or_generate_key(self) -> rsa.RSAPrivateKey:
-        """Load existing RSA key or generate a new one."""
         key_file = self._key_path / "private_key.pem"
         if key_file.exists():
             return serialization.load_pem_private_key(
                 key_file.read_bytes(), password=None
             )
-        # Generate new RSA-384 key pair
         private_key = rsa.generate_private_key(
             public_exponent=65537, key_size=2048
         )
@@ -83,7 +63,6 @@ class SMARTAuth:
                 encryption_algorithm=serialization.NoEncryption(),
             )
         )
-        # Also save public key for JWKS
         pub_file = self._key_path / "public_key.pem"
         pub_file.write_bytes(
             private_key.public_key().public_bytes(
@@ -94,7 +73,10 @@ class SMARTAuth:
         return private_key
 
     def get_jwks(self) -> dict:
-        """Return JWKS JSON for the public key (served at /.well-known/jwks.json)."""
+        """Return JWKS JSON for the public key. Only meaningful for JWT auth."""
+        if self._private_key is None:
+            return {"keys": []}
+
         from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
         import base64
 
@@ -119,27 +101,48 @@ class SMARTAuth:
             ]
         }
 
+    # ---- OAuth2 URL / token helpers ----
+
     def get_authorize_url(self, state: Optional[str] = None) -> str:
-        """Build the authorization URL for SMART standalone launch."""
         state = state or str(uuid.uuid4())
         params = {
             "response_type": "code",
-            "client_id": self.settings.ecw_client_id,
-            "redirect_uri": self.settings.ecw_redirect_uri,
-            "scope": " ".join(self.SCOPES),
+            "client_id": self.emr.client_id,
+            "redirect_uri": self.emr.redirect_uri,
+            "scope": " ".join(self.emr.scopes),
             "state": state,
-            "aud": self.settings.ecw_fhir_base_url,
+            "aud": self.emr.fhir_base_url,
         }
         query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{self.settings.ecw_authorize_url}?{query}"
+        return f"{self.emr.authorize_url}?{query}"
+
+    def _build_token_data(self, **extra) -> dict:
+        """Build token endpoint POST body with the correct auth method."""
+        data = {**extra}
+        if self.emr.auth_method == AuthMethod.ASYMMETRIC_JWT:
+            data["client_assertion_type"] = (
+                "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+            )
+            data["client_assertion"] = self._build_client_assertion()
+        elif self.emr.auth_method == AuthMethod.CLIENT_SECRET_POST:
+            data["client_id"] = self.emr.client_id
+            data["client_secret"] = self.emr.client_secret
+        # CLIENT_SECRET (basic) uses HTTP auth header instead
+        return data
+
+    def _build_auth_header(self) -> Optional[tuple[str, str]]:
+        """Return HTTP Basic auth tuple for client_secret_basic, else None."""
+        if self.emr.auth_method == AuthMethod.CLIENT_SECRET:
+            return (self.emr.client_id, self.emr.client_secret)
+        return None
 
     def _build_client_assertion(self) -> str:
-        """Build a signed JWT for client authentication (asymmetric)."""
+        """JWT client assertion for private_key_jwt auth."""
         now = int(time.time())
         payload = {
-            "iss": self.settings.ecw_client_id,
-            "sub": self.settings.ecw_client_id,
-            "aud": self.settings.ecw_token_url,
+            "iss": self.emr.client_id,
+            "sub": self.emr.client_id,
+            "aud": self.emr.token_url,
             "exp": now + 300,
             "iat": now,
             "jti": str(uuid.uuid4()),
@@ -151,59 +154,58 @@ class SMARTAuth:
             headers={"kid": "patientbridge-1"},
         )
 
+    # ---- Token exchange/refresh ----
+
     async def exchange_code(self, code: str) -> TokenSet:
-        """Exchange authorization code for tokens."""
+        data = self._build_token_data(
+            grant_type="authorization_code",
+            code=code,
+            redirect_uri=self.emr.redirect_uri,
+        )
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                self.settings.ecw_token_url,
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": self.settings.ecw_redirect_uri,
-                    "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-                    "client_assertion": self._build_client_assertion(),
-                },
+                self.emr.token_url,
+                data=data,
+                auth=self._build_auth_header(),
             )
             resp.raise_for_status()
-            data = resp.json()
+            body = resp.json()
             self._token = TokenSet(
-                access_token=data["access_token"],
-                token_type=data.get("token_type", "Bearer"),
-                expires_in=data.get("expires_in", 3600),
-                refresh_token=data.get("refresh_token"),
-                scope=data.get("scope", ""),
-                id_token=data.get("id_token"),
+                access_token=body["access_token"],
+                token_type=body.get("token_type", "Bearer"),
+                expires_in=body.get("expires_in", 3600),
+                refresh_token=body.get("refresh_token"),
+                scope=body.get("scope", ""),
+                id_token=body.get("id_token"),
             )
             return self._token
 
     async def refresh(self) -> TokenSet:
-        """Use refresh token to get a new access token."""
         if not self._token or not self._token.refresh_token:
             raise ValueError("No refresh token available. Re-authorize.")
+        data = self._build_token_data(
+            grant_type="refresh_token",
+            refresh_token=self._token.refresh_token,
+        )
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                self.settings.ecw_token_url,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self._token.refresh_token,
-                    "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-                    "client_assertion": self._build_client_assertion(),
-                },
+                self.emr.token_url,
+                data=data,
+                auth=self._build_auth_header(),
             )
             resp.raise_for_status()
-            data = resp.json()
+            body = resp.json()
             self._token = TokenSet(
-                access_token=data["access_token"],
-                token_type=data.get("token_type", "Bearer"),
-                expires_in=data.get("expires_in", 3600),
-                refresh_token=data.get("refresh_token", self._token.refresh_token),
-                scope=data.get("scope", self._token.scope),
-                id_token=data.get("id_token"),
+                access_token=body["access_token"],
+                token_type=body.get("token_type", "Bearer"),
+                expires_in=body.get("expires_in", 3600),
+                refresh_token=body.get("refresh_token", self._token.refresh_token),
+                scope=body.get("scope", self._token.scope),
+                id_token=body.get("id_token"),
             )
             return self._token
 
     async def get_valid_token(self) -> str:
-        """Return a valid access token, refreshing if needed."""
         if not self._token:
             raise ValueError("Not authenticated. Complete OAuth flow first.")
         if self._token.is_expired:
