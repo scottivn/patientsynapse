@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>App Name & Logo Options</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #0f1117;
+    color: #e4e4e7;
+    padding: 40px 20px;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 60px;
+  }
+  .header h1 {
+    font-size: 2rem;
+    font-weight: 300;
+    color: #a1a1aa;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .header p {
+    color: #71717a;
+    margin-top: 8px;
+    font-size: 0.9rem;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+    gap: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 16px;
+    padding: 40px;
+    transition: all 0.3s;
+  }
+  .card:hover {
+    border-color: #3f3f46;
+    transform: translateY(-2px);
+  }
+  .logo-area {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    flex-shrink: 0;
+  }
+  .name {
+    font-size: 1.8rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .tagline {
+    font-size: 0.85rem;
+    color: #71717a;
+    margin-bottom: 20px;
+    font-style: italic;
+  }
+  .domains {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .domain {
+    background: #27272a;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-family: 'Space Grotesk', monospace;
+    color: #a1a1aa;
+  }
+  .domain.likely {
+    background: #052e16;
+    color: #4ade80;
+    border: 1px solid #166534;
+  }
+  .desc {
+    font-size: 0.85rem;
+    color: #a1a1aa;
+    line-height: 1.6;
+  }
+  .mini-logos {
+    display: flex;
+    gap: 24px;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #27272a;
+  }
+  .mini-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .mini-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .mini-label {
+    font-size: 0.75rem;
+    color: #71717a;
+  }
+  .mini-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  /* Individual brand colors */
+  .card-1 .icon { background: linear-gradient(135deg, #0ea5e9, #0284c7); }
+  .card-1 .name { color: #38bdf8; font-family: 'Space Grotesk', sans-serif; }
+
+  .card-2 .icon { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+  .card-2 .name { color: #a78bfa; font-family: 'Sora', sans-serif; }
+
+  .card-3 .icon { background: linear-gradient(135deg, #10b981, #059669); }
+  .card-3 .name { color: #34d399; font-family: 'DM Sans', sans-serif; }
+
+  .card-4 .icon { background: linear-gradient(135deg, #f59e0b, #d97706); }
+  .card-4 .name { color: #fbbf24; font-family: 'Outfit', sans-serif; }
+
+  .card-5 .icon { background: linear-gradient(135deg, #ec4899, #db2777); }
+  .card-5 .name { color: #f472b6; font-family: 'Space Grotesk', sans-serif; }
+
+  .card-6 .icon { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+  .card-6 .name { color: #22d3ee; font-family: 'Outfit', sans-serif; font-weight: 800; }
+
+  .card-7 .icon { background: linear-gradient(135deg, #f97316, #ea580c); }
+  .card-7 .name { color: #fb923c; font-family: 'Sora', sans-serif; }
+
+  .card-8 .icon { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+  .card-8 .name { color: #2dd4bf; font-family: 'DM Sans', sans-serif; font-weight: 800; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Name & Logo Options</h1>
+  <p>AI-powered referral processing, fax triage, and EMR integration for medical practices</p>
+</div>
+
+<div class="grid">
+
+  <!-- 1. ReferralFlow -->
+  <div class="card card-1">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M4 14h8m0 0l-3-3m3 3l-3 3" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M16 14h8m0 0l-3-3m3 3l-3 3" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+          <circle cx="14" cy="14" r="3" fill="#fff" opacity="0.3"/>
+        </svg>
+      </div>
+      <div class="name">ReferralFlow</div>
+    </div>
+    <div class="tagline">"Every referral, handled."</div>
+    <div class="domains">
+      <span class="domain likely">referralflow.io</span>
+      <span class="domain likely">referralflow.health</span>
+      <span class="domain">referralflow.app</span>
+    </div>
+    <div class="desc">
+      Direct, descriptive — immediately communicates the core value. 
+      The "flow" implies automation and smooth processing. 
+      Logo: twin arrows flowing through a node — movement, routing, intelligence.
+    </div>
+  </div>
+
+  <!-- 2. MedRelay -->
+  <div class="card card-2">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect x="3" y="10" width="8" height="8" rx="2" stroke="#fff" stroke-width="2" opacity="0.5"/>
+          <rect x="17" y="10" width="8" height="8" rx="2" stroke="#fff" stroke-width="2"/>
+          <path d="M11 14h6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 2"/>
+          <circle cx="14" cy="14" r="1.5" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="name">MedRelay</div>
+    </div>
+    <div class="tagline">"Relaying care, intelligently."</div>
+    <div class="domains">
+      <span class="domain likely">medrelay.io</span>
+      <span class="domain likely">medrelay.health</span>
+      <span class="domain likely">medrelay.app</span>
+    </div>
+    <div class="desc">
+      Short, punchy, memorable. "Relay" = passing information between systems/providers.
+      Medical context is instant. Easy to say, easy to spell.
+      Logo: two connected nodes with a relay point — bridging EMRs.
+    </div>
+  </div>
+
+  <!-- 3. IntakeAI -->
+  <div class="card card-3">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M6 6h16v4H6z" fill="#fff" opacity="0.2" rx="1"/>
+          <path d="M6 12h12v4H6z" fill="#fff" opacity="0.4" rx="1"/>
+          <path d="M6 18h8v4H6z" fill="#fff" opacity="0.7" rx="1"/>
+          <circle cx="22" cy="20" r="4" stroke="#fff" stroke-width="2"/>
+          <path d="M22 18v4m-2-2h4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="name">IntakeAI</div>
+    </div>
+    <div class="tagline">"Intelligent patient intake, zero manual work."</div>
+    <div class="domains">
+      <span class="domain likely">intakeai.com</span>
+      <span class="domain likely">intakeai.health</span>
+      <span class="domain">getintakeai.com</span>
+    </div>
+    <div class="desc">
+      Signals AI-first, focuses on the intake/triage workflow.
+      Broad enough to cover referrals, faxes, forms, and onboarding.
+      Logo: stacked document layers converging into an AI spark — funneling chaos into structure.
+    </div>
+  </div>
+
+  <!-- 4. FaxIQ -->
+  <div class="card card-4">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <rect x="5" y="4" width="14" height="20" rx="2" stroke="#fff" stroke-width="2"/>
+          <path d="M9 10h6M9 14h4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+          <circle cx="21" cy="8" r="5" fill="#fff" opacity="0.25"/>
+          <text x="18.5" y="11" fill="#fff" font-size="8" font-weight="700" font-family="sans-serif">IQ</text>
+        </svg>
+      </div>
+      <div class="name">FaxIQ</div>
+    </div>
+    <div class="tagline">"Your fax inbox just got smarter."</div>
+    <div class="domains">
+      <span class="domain likely">faxiq.com</span>
+      <span class="domain likely">faxiq.io</span>
+      <span class="domain likely">faxiq.health</span>
+    </div>
+    <div class="desc">
+      Ultra-short, catchy, instantly understood. "IQ" implies intelligence.
+      Niche but powerful — fax processing is the #1 pain point you solve.
+      Logo: document with an IQ badge — smart document processing.
+    </div>
+  </div>
+
+  <!-- 5. CareRoute -->
+  <div class="card card-5">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M4 20 C8 8, 12 8, 14 14 S20 20, 24 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+          <circle cx="4" cy="20" r="2.5" fill="#fff" opacity="0.4"/>
+          <circle cx="24" cy="8" r="2.5" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="name">CareRoute</div>
+    </div>
+    <div class="tagline">"Route care to the right place."</div>
+    <div class="domains">
+      <span class="domain likely">careroute.io</span>
+      <span class="domain likely">careroute.health</span>
+      <span class="domain likely">careroute.app</span>
+    </div>
+    <div class="desc">
+      Warm + technical. "Care" = healthcare empathy. "Route" = intelligent routing/triage.
+      Works for referrals, scheduling, and document routing.
+      Logo: flowing path connecting two points — care finding its way.
+    </div>
+  </div>
+
+  <!-- 6. Triaj -->
+  <div class="card card-6">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M14 4v8" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M14 12l-7 8" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+          <path d="M14 12l7 8" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+          <path d="M14 12v8" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+          <circle cx="14" cy="12" r="3" fill="#fff" opacity="0.3"/>
+        </svg>
+      </div>
+      <div class="name">Triaj</div>
+    </div>
+    <div class="tagline">"AI triage for every document."</div>
+    <div class="domains">
+      <span class="domain likely">triaj.io</span>
+      <span class="domain likely">triaj.health</span>
+      <span class="domain likely">triaj.app</span>
+    </div>
+    <div class="desc">
+      Stylized "triage" — short, brandable, unique. 5 letters.
+      Medical professionals instantly get it. 
+      Logo: branching decision tree — one input splits into classified outputs.
+    </div>
+  </div>
+
+  <!-- 7. DocParse -->
+  <div class="card card-7">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M7 4h10l4 4v16a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" stroke="#fff" stroke-width="2"/>
+          <path d="M17 4v4h4" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+          <path d="M9 13h10M9 17h6" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+          <path d="M20 16l3 3m0 0l3 3m-3-3l3-3m-3 3l-3 3" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+        </svg>
+      </div>
+      <div class="name">DocParse</div>
+    </div>
+    <div class="tagline">"From fax to FHIR in seconds."</div>
+    <div class="domains">
+      <span class="domain likely">docparse.io</span>
+      <span class="domain likely">docparse.health</span>
+      <span class="domain">docparse.ai</span>
+    </div>
+    <div class="desc">
+      Technical, developer-friendly. "Doc" = document (and doctor!). "Parse" = extract structure.
+      Clear value prop for technical buyers. Great for B2B SaaS positioning.
+      Logo: document being deconstructed into structured data.
+    </div>
+  </div>
+
+  <!-- 8. NexReferral -->
+  <div class="card card-8">
+    <div class="logo-area">
+      <div class="icon">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M6 14h5l3-6 3 12 3-6h5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="name">NexCare</div>
+    </div>
+    <div class="tagline">"Next-gen care coordination."</div>
+    <div class="domains">
+      <span class="domain likely">nexcare.io</span>
+      <span class="domain likely">nexcare.health</span>
+      <span class="domain">nexcare.app</span>
+    </div>
+    <div class="desc">
+      "Nex" = next/connected. Modern, forward-looking. 
+      Broad enough to encompass the full platform vision beyond just faxes.
+      Logo: heartbeat/pulse line — vital signs of a living, connected care system.
+    </div>
+  </div>
+
+</div>
+
+<div style="max-width: 1200px; margin: 60px auto 0; padding: 32px; background: #1c1c21; border-radius: 12px; border: 1px solid #27272a;">
+  <h2 style="font-size: 1.1rem; color: #e4e4e7; margin-bottom: 16px;">Quick Comparison</h2>
+  <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+    <thead>
+      <tr style="border-bottom: 1px solid #27272a; text-align: left;">
+        <th style="padding: 8px 12px; color: #71717a;">Name</th>
+        <th style="padding: 8px 12px; color: #71717a;">Length</th>
+        <th style="padding: 8px 12px; color: #71717a;">Memorable</th>
+        <th style="padding: 8px 12px; color: #71717a;">Medical Signal</th>
+        <th style="padding: 8px 12px; color: #71717a;">Scope</th>
+        <th style="padding: 8px 12px; color: #71717a;">Best Domain</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #38bdf8; font-weight: 600;">ReferralFlow</td><td style="padding: 10px 12px;">12</td><td style="padding: 10px 12px;">⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐⭐⭐</td><td style="padding: 10px 12px;">Narrow</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">referralflow.io</td></tr>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #a78bfa; font-weight: 600;">MedRelay</td><td style="padding: 10px 12px;">8</td><td style="padding: 10px 12px;">⭐⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">Broad</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">medrelay.io</td></tr>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #34d399; font-weight: 600;">IntakeAI</td><td style="padding: 10px 12px;">8</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">Broad</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">intakeai.com</td></tr>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #fbbf24; font-weight: 600;">FaxIQ</td><td style="padding: 10px 12px;">5</td><td style="padding: 10px 12px;">⭐⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐</td><td style="padding: 10px 12px;">Narrow</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">faxiq.com</td></tr>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #f472b6; font-weight: 600;">CareRoute</td><td style="padding: 10px 12px;">9</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐⭐⭐</td><td style="padding: 10px 12px;">Broad</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">careroute.health</td></tr>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #22d3ee; font-weight: 600;">Triaj</td><td style="padding: 10px 12px;">5</td><td style="padding: 10px 12px;">⭐⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐⭐⭐</td><td style="padding: 10px 12px;">Medium</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">triaj.io</td></tr>
+      <tr style="border-bottom: 1px solid #27272a;"><td style="padding: 10px 12px; color: #fb923c; font-weight: 600;">DocParse</td><td style="padding: 10px 12px;">8</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐</td><td style="padding: 10px 12px;">Medium</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">docparse.io</td></tr>
+      <tr><td style="padding: 10px 12px; color: #2dd4bf; font-weight: 600;">NexCare</td><td style="padding: 10px 12px;">7</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">⭐⭐⭐⭐</td><td style="padding: 10px 12px;">Broad</td><td style="padding: 10px 12px; font-family: monospace; color: #4ade80;">nexcare.io</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

@@ -81,6 +81,30 @@ class AthenaProvider(EMRProvider):
         return AuthMethod.CLIENT_SECRET
 
     @property
+    def system_scopes(self) -> list[str]:
+        """2-legged scopes for client_credentials (no user login).
+        SMART v2 granular format: .rs = read+search.
+        NOTE: Add 'athena/service/Athenanet.MDP' here once it propagates
+        in the Athena developer portal (can take 15-30 min after saving)."""
+        return [
+            "system/Patient.rs",
+            "system/AllergyIntolerance.rs",
+            "system/Condition.rs",
+            "system/Coverage.rs",
+            "system/DiagnosticReport.rs",
+            "system/DocumentReference.rs",
+            "system/Encounter.rs",
+            "system/Immunization.rs",
+            "system/Location.rs",
+            "system/MedicationRequest.rs",
+            "system/Observation.rs",
+            "system/Organization.rs",
+            "system/Practitioner.rs",
+            "system/Procedure.rs",
+            "system/ServiceRequest.rs",
+        ]
+
+    @property
     def supports_refresh(self) -> bool:
         return True
 

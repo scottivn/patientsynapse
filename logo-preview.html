@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PatientSynapse — Logo Preview</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f8fafc; color: #1e293b; }
+        .header { background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%); color: white; padding: 60px 40px; text-align: center; }
+        .header h1 { font-size: 3rem; font-weight: 800; margin-bottom: 8px; }
+        .header p { font-size: 1.1rem; opacity: 0.9; }
+        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        .section { background: white; border-radius: 16px; padding: 40px; margin-bottom: 30px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .section h2 { font-size: 1.3rem; color: #6366f1; margin-bottom: 24px; font-weight: 700; }
+        .logo-row { display: flex; align-items: center; justify-content: center; gap: 40px; flex-wrap: wrap; }
+        .logo-card { background: #f8fafc; border-radius: 12px; padding: 30px; text-align: center; border: 1px solid #e2e8f0; }
+        .logo-card.dark { background: #1e293b; border-color: #334155; }
+        .logo-card img, .logo-card object { max-width: 100%; height: auto; }
+        .logo-label { margin-top: 12px; font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        .color-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
+        .color-swatch { width: 80px; height: 80px; border-radius: 12px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; font-size: 0.7rem; color: white; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .info-item { padding: 16px; background: #f1f5f9; border-radius: 10px; }
+        .info-item h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 6px; }
+        .info-item p { font-size: 1rem; font-weight: 600; color: #1e293b; }
+        @media (max-width: 600px) { .info-grid { grid-template-columns: 1fr; } .logo-row { flex-direction: column; } }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>PatientSynapse</h1>
+    <p>Intelligent Connections Between Every Point of Care</p>
+</div>
+
+<div class="container">
+
+    <!-- Full Logo -->
+    <div class="section">
+        <h2>Full Logo</h2>
+        <div class="logo-row">
+            <div class="logo-card" style="min-width:500px">
+                <object type="image/svg+xml" data="assets/logos/logo.svg" width="500" height="120">Logo</object>
+                <div class="logo-label">Light Background</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Banner Logo -->
+    <div class="section">
+        <h2>Banner / Nav Logo</h2>
+        <div class="logo-row">
+            <div class="logo-card">
+                <object type="image/svg+xml" data="assets/logos/logo-banner.svg" width="230" height="35">Banner</object>
+                <div class="logo-label">Sidebar / Header</div>
+            </div>
+            <div class="logo-card dark">
+                <object type="image/svg+xml" data="assets/logos/logo-banner.svg" width="230" height="35">Banner</object>
+                <div class="logo-label" style="color:#64748b">Dark Background</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Icon Logo -->
+    <div class="section">
+        <h2>Icon / Favicon</h2>
+        <div class="logo-row">
+            <div class="logo-card">
+                <object type="image/svg+xml" data="assets/logos/logo-icon.svg" width="80" height="80">Icon</object>
+                <div class="logo-label">80×80</div>
+            </div>
+            <div class="logo-card dark">
+                <object type="image/svg+xml" data="assets/logos/logo-icon.svg" width="80" height="80">Icon</object>
+                <div class="logo-label" style="color:#64748b">Dark</div>
+            </div>
+            <div class="logo-card" style="padding:15px">
+                <object type="image/svg+xml" data="assets/logos/logo-icon.svg" width="32" height="32">Favicon</object>
+                <div class="logo-label">Favicon 32px</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Color Palette -->
+    <div class="section">
+        <h2>Brand Color Palette</h2>
+        <div class="color-row">
+            <div class="color-swatch" style="background:#6366f1">#6366f1</div>
+            <div class="color-swatch" style="background:#818cf8">#818cf8</div>
+            <div class="color-swatch" style="background:#4f46e5">#4f46e5</div>
+            <div class="color-swatch" style="background:#06b6d4">#06b6d4</div>
+            <div class="color-swatch" style="background:#22d3ee">#22d3ee</div>
+            <div class="color-swatch" style="background:#10b981">#10b981</div>
+            <div class="color-swatch" style="background:#1e293b">#1e293b</div>
+        </div>
+        <div style="margin-top:20px; font-size:0.9rem; color:#64748b">
+            <strong>Primary:</strong> Indigo (#6366f1) — neural/AI tone<br>
+            <strong>Secondary:</strong> Cyan (#06b6d4) — connectivity/data flow<br>
+            <strong>Accent:</strong> Emerald (#10b981) — medical/health cross<br>
+            <strong>Text:</strong> Slate (#1e293b) — professional readability
+        </div>
+    </div>
+
+    <!-- Brand Info -->
+    <div class="section">
+        <h2>Brand Details</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <h4>Name</h4>
+                <p>PatientSynapse</p>
+            </div>
+            <div class="info-item">
+                <h4>Domain</h4>
+                <p>patientsynapse.com</p>
+            </div>
+            <div class="info-item">
+                <h4>Tagline</h4>
+                <p>Intelligent Connections Between Every Point of Care</p>
+            </div>
+            <div class="info-item">
+                <h4>Icon Concept</h4>
+                <p>Neural synapse — two neurons connected by signal arc with medical cross</p>
+            </div>
+            <div class="info-item">
+                <h4>Typography</h4>
+                <p>"Patient" (dark) + "Synapse" (indigo)</p>
+            </div>
+            <div class="info-item">
+                <h4>Metaphor</h4>
+                <p>Synaptic connection = data/referral flow between EMR systems</p>
+            </div>
+        </div>
+    </div>
+
+</div>
+</body>
+</html>

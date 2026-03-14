@@ -1,4 +1,4 @@
-# PatientBridge — Python dependencies
+# PatientSynapse — Python dependencies
 
 # Web framework
 fastapi>=0.115.0

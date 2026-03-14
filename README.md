@@ -1,12 +1,12 @@
-# PatientBridge
+# PatientSynapse
 
-![PatientBridge Logo](logo.svg)
+![PatientSynapse Logo](logo.svg)
 
-**Connecting Care, Streamlining Workflow**
+**Intelligent Connections Between Every Point of Care**
 
 ## Overview
 
-PatientBridge is an intelligent automation platform that transforms referral fax processing and revenue cycle management for eCW (eClinicalWorks) practices. Using API-driven workflows and AI-powered document intelligence, PatientBridge eliminates manual data entry and accelerates patient scheduling.
+PatientSynapse is an intelligent automation platform that transforms referral fax processing and revenue cycle management for medical practices. Using API-driven workflows and AI-powered document intelligence, PatientSynapse eliminates manual data entry and accelerates patient scheduling.
 
 ## Key Features
 
@@ -81,7 +81,7 @@ export ECW_PASSWORD="your-ecw-password"
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Fax/PDF   │────▶│ PatientBridge│────▶│ eCW Patient │
+│   Fax/PDF   │────▶│PatientSynapse│────▶│ eCW Patient │
 │  Documents  │     │   AI Engine  │     │   Records   │
 └─────────────┘     └──────────────┘     └─────────────┘
                            │
@@ -142,4 +142,4 @@ For more information or to request a demo:
 
 ---
 
-**PatientBridge** - Transforming referral processing from hours to minutes
+**PatientSynapse** - Transforming referral processing from hours to minutes

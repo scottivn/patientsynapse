@@ -24,15 +24,33 @@ export default function Layout() {
         {/* Logo */}
         <div className="h-16 flex items-center px-5 border-b border-gray-100">
           <div className="flex items-center gap-2">
-            <svg viewBox="0 0 28 28" className="w-7 h-7" fill="none">
-              <rect x="0" y="11" width="4" height="14" rx="1" fill="#2563eb" />
-              <rect x="24" y="11" width="4" height="14" rx="1" fill="#2563eb" />
-              <path d="M 2 11 Q 14 1, 26 11" stroke="#0ea5e9" strokeWidth="4" fill="none" strokeLinecap="round" />
-              <rect x="12.5" y="2" width="3" height="8" rx="0.5" fill="#10b981" />
-              <rect x="10" y="4.5" width="8" height="3" rx="0.5" fill="#10b981" />
+            <svg viewBox="0 0 40 28" className="w-8 h-7" fill="none">
+              {/* Left neuron */}
+              <circle cx="6" cy="14" r="5" fill="#6366f1" opacity="0.9"/>
+              <circle cx="6" cy="14" r="3" fill="#818cf8"/>
+              {/* Dendrites left */}
+              <line x1="3" y1="8" x2="1" y2="4" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+              <line x1="6" y1="9" x2="6" y2="4" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" opacity="0.6"/>
+              <line x1="9" y1="10" x2="12" y2="5" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+              {/* Axon left */}
+              <path d="M 11 14 C 15 14, 15 7, 18 7" stroke="#10b981" strokeWidth="2" fill="none" strokeLinecap="round"/>
+              {/* Gap */}
+              <circle cx="20" cy="7" r="1.5" fill="#10b981" opacity="0.5"/>
+              {/* Axon right */}
+              <path d="M 22 7 C 25 7, 25 14, 29 14" stroke="#10b981" strokeWidth="2" fill="none" strokeLinecap="round"/>
+              {/* Right neuron */}
+              <circle cx="34" cy="14" r="5" fill="#06b6d4" opacity="0.9"/>
+              <circle cx="34" cy="14" r="3" fill="#22d3ee"/>
+              {/* Dendrites right */}
+              <line x1="37" y1="10" x2="39" y2="5" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+              <line x1="34" y1="9" x2="34" y2="4" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round" opacity="0.6"/>
+              <line x1="31" y1="8" x2="28" y2="4" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+              {/* Medical cross */}
+              <rect x="19" y="15" width="2" height="6" rx="0.5" fill="#10b981"/>
+              <rect x="17.5" y="16.5" width="5" height="2" rx="0.5" fill="#10b981"/>
             </svg>
             <span className="text-lg font-bold text-gray-900">
-              Patient<span className="text-brand-500">Bridge</span>
+              Patient<span className="text-indigo-500">Synapse</span>
             </span>
           </div>
         </div>

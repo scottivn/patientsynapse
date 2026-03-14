@@ -1,4 +1,4 @@
-"""Referral fax processing service — the core of PatientBridge."""
+"""Referral fax processing service — the core of PatientSynapse."""
 
 import logging
 import json
@@ -66,12 +66,14 @@ class ReferralRecord:
     filename: str
     status: ReferralStatus
     uploaded_at: str
+    document_type: str = "referral"  # referral | lab_result | insurance_auth | medical_records | other
     extracted_data: Optional[ExtractedReferral] = None
     patient_id: Optional[str] = None
     service_request_id: Optional[str] = None
     error: Optional[str] = None
     reviewed_by: Optional[str] = None
     completed_at: Optional[str] = None
+    raw_text: Optional[str] = None  # OCR text for non-referral docs
 
 
 class ReferralService:
@@ -111,6 +113,45 @@ class ReferralService:
             logger.info(f"[{ref_id}] Extraction complete, awaiting review")
         except Exception as e:
             logger.error(f"[{ref_id}] Extraction failed: {e}")
+            record.status = ReferralStatus.FAILED
+            record.error = str(e)
+
+        return record
+
+    async def classify_and_process(self, fax_text: str, filename: str) -> ReferralRecord:
+        """Classify the document first, then route appropriately."""
+        import uuid
+        ref_id = str(uuid.uuid4())[:8]
+        record = ReferralRecord(
+            id=ref_id,
+            filename=filename,
+            status=ReferralStatus.PROCESSING,
+            uploaded_at=datetime.utcnow().isoformat(),
+        )
+        self._referrals[ref_id] = record
+
+        try:
+            # Step 1: Classify the document
+            logger.info(f"[{ref_id}] Classifying document {filename}")
+            doc_type = await self.llm.classify_document(fax_text)
+            valid_types = ("referral", "lab_result", "insurance_auth", "medical_records", "other")
+            record.document_type = doc_type if doc_type in valid_types else "other"
+            logger.info(f"[{ref_id}] Classified as: {record.document_type}")
+
+            if record.document_type == "referral":
+                # Step 2: Full referral extraction
+                raw = await self.llm.extract_referral_data(fax_text)
+                record.extracted_data = self._parse_extracted(raw)
+                record.status = ReferralStatus.REVIEW
+                logger.info(f"[{ref_id}] Referral extraction complete, awaiting review")
+            else:
+                # Non-referral: store OCR text, mark for review
+                record.raw_text = fax_text[:5000]  # Cap stored text
+                record.status = ReferralStatus.REVIEW
+                logger.info(f"[{ref_id}] Non-referral ({record.document_type}), stored for review")
+
+        except Exception as e:
+            logger.error(f"[{ref_id}] Processing failed: {e}")
             record.status = ReferralStatus.FAILED
             record.error = str(e)
 

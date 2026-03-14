@@ -1,4 +1,4 @@
-"""PatientBridge configuration via environment variables."""
+"""PatientSynapse configuration via environment variables."""
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # LLM
     llm_provider: Literal["grok", "openai", "anthropic", "ollama"] = "grok"
     xai_api_key: str = Field(default="")
-    xai_model: str = "grok-3"
+    xai_model: str = "grok-4-1-fast-non-reasoning"
     openai_api_key: str = Field(default="")
     openai_model: str = "gpt-4o"
     anthropic_api_key: str = Field(default="")
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     fax_upload_dir: str = "./uploads"
 
     # Database
-    database_url: str = "sqlite:///./patientbridge.db"
+    database_url: str = "sqlite:///./patientsynapse.db"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

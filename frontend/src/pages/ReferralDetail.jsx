@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, XCircle, User, Stethoscope, FileText, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, XCircle, User, Stethoscope, FileText, AlertTriangle, Tag } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
 import { getReferral, approveReferral, rejectReferral } from '../services/api'
+
+const DOC_TYPE_STYLES = {
+  referral: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Referral' },
+  lab_result: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Lab Result' },
+  insurance_auth: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Insurance Auth' },
+  medical_records: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Medical Records' },
+  other: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Other' },
+}
 
 export default function ReferralDetail() {
   const { id } = useParams()
@@ -45,6 +53,9 @@ export default function ReferralDetail() {
   if (!referral) return null
 
   const d = referral.extracted_data || {}
+  const docType = referral.document_type || 'referral'
+  const typeStyle = DOC_TYPE_STYLES[docType] || DOC_TYPE_STYLES.other
+  const isReferral = docType === 'referral'
 
   return (
     <div className="space-y-6">
@@ -55,16 +66,19 @@ export default function ReferralDetail() {
         </button>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">Referral {referral.id}</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{isReferral ? 'Referral' : 'Document'} {referral.id}</h1>
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${typeStyle.bg} ${typeStyle.text}`}>
+              {typeStyle.label}
+            </span>
             <StatusBadge status={referral.status} />
           </div>
           <p className="text-sm text-gray-500 mt-0.5">{referral.filename}</p>
         </div>
-        {referral.status === 'review' && (
+        {referral.status === 'review' && isReferral && (
           <div className="flex items-center gap-2">
             <button onClick={handleApprove} disabled={acting} className="btn-success flex items-center gap-2">
               <CheckCircle2 size={16} />
-              Approve & Push to eCW
+              Approve & Push to EMR
             </button>
             <button onClick={handleReject} disabled={acting} className="btn-danger flex items-center gap-2">
               <XCircle size={16} />
@@ -82,42 +96,60 @@ export default function ReferralDetail() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Patient info */}
-        <div className="card">
-          <div className="flex items-center gap-2 mb-4">
-            <User size={18} className="text-brand-500" />
-            <h2 className="font-semibold text-gray-900">Patient Information</h2>
-          </div>
-          <div className="space-y-3">
-            <Field label="Name" value={`${d.patient_first_name || ''} ${d.patient_last_name || ''}`} />
-            <Field label="Date of Birth" value={d.patient_dob} />
-            <Field label="Gender" value={d.patient_gender} />
-            <Field label="Phone" value={d.patient_phone} />
-            <Field label="Address" value={
-              [d.patient_address_line, d.patient_address_city, d.patient_address_state, d.patient_address_zip]
-                .filter(Boolean).join(', ')
-            } />
-            <Field label="Insurance" value={d.insurance_name} />
-            <Field label="Insurance ID" value={d.insurance_id} />
-          </div>
-        </div>
+        {/* Referral-specific panels */}
+        {isReferral && (
+          <>
+            {/* Patient info */}
+            <div className="card">
+              <div className="flex items-center gap-2 mb-4">
+                <User size={18} className="text-brand-500" />
+                <h2 className="font-semibold text-gray-900">Patient Information</h2>
+              </div>
+              <div className="space-y-3">
+                <Field label="Name" value={`${d.patient_first_name || ''} ${d.patient_last_name || ''}`} />
+                <Field label="Date of Birth" value={d.patient_dob} />
+                <Field label="Gender" value={d.patient_gender} />
+                <Field label="Phone" value={d.patient_phone} />
+                <Field label="Address" value={
+                  [d.patient_address_line, d.patient_address_city, d.patient_address_state, d.patient_address_zip]
+                    .filter(Boolean).join(', ')
+                } />
+                <Field label="Insurance" value={d.insurance_name} />
+                <Field label="Insurance ID" value={d.insurance_id} />
+              </div>
+            </div>
 
-        {/* Referral info */}
-        <div className="card">
-          <div className="flex items-center gap-2 mb-4">
-            <Stethoscope size={18} className="text-brand-500" />
-            <h2 className="font-semibold text-gray-900">Referral Details</h2>
+            {/* Referral info */}
+            <div className="card">
+              <div className="flex items-center gap-2 mb-4">
+                <Stethoscope size={18} className="text-brand-500" />
+                <h2 className="font-semibold text-gray-900">Referral Details</h2>
+              </div>
+              <div className="space-y-3">
+                <Field label="Referring Provider" value={d.referring_provider} />
+                <Field label="Practice" value={d.referring_practice} />
+                <Field label="Phone" value={d.referring_phone} />
+                <Field label="Fax" value={d.referring_fax} />
+                <Field label="Reason" value={d.reason} />
+                <Field label="Urgency" value={d.urgency} highlight={d.urgency !== 'routine'} />
+                <Field label="Notes" value={d.notes} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Non-referral: show raw OCR text */}
+        {!isReferral && referral.raw_text && (
+          <div className="card lg:col-span-2">
+            <div className="flex items-center gap-2 mb-4">
+              <FileText size={18} className="text-brand-500" />
+              <h2 className="font-semibold text-gray-900">Document Content (OCR)</h2>
+            </div>
+            <pre className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto font-mono leading-relaxed">
+              {referral.raw_text}
+            </pre>
           </div>
-          <div className="space-y-3">
-            <Field label="Referring Provider" value={d.referring_provider} />
-            <Field label="Practice" value={d.referring_practice} />
-            <Field label="Phone" value={d.referring_phone} />
-            <Field label="Fax" value={d.referring_fax} />
-            <Field label="Reason" value={d.reason} />
-            <Field label="Urgency" value={d.urgency} highlight={d.urgency !== 'routine'} />
-            <Field label="Notes" value={d.notes} />
-          </div>
-        </div>
+        )}
 
         {/* Diagnosis codes */}
         {d.diagnosis_codes?.length > 0 && (
@@ -153,7 +185,7 @@ export default function ReferralDetail() {
             )}
             {referral.patient_id && (
               <div>
-                <p className="text-gray-500">eCW Patient ID</p>
+                <p className="text-gray-500">EMR Patient ID</p>
                 <p className="font-medium font-mono">{referral.patient_id}</p>
               </div>
             )}

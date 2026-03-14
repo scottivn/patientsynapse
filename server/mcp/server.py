@@ -1,4 +1,4 @@
-"""PatientBridge MCP Server — AI agent tools for Claude/LLM integration."""
+"""PatientSynapse MCP Server — AI agent tools for Claude/LLM integration."""
 
 import json
 import logging
@@ -8,7 +8,7 @@ from server.llm.base import LLMMessage
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("PatientBridge")
+mcp = FastMCP("PatientSynapse")
 
 
 # ---- Referral Processing Tools ----
@@ -130,7 +130,7 @@ Return ONLY valid JSON.""",
 
 @mcp.tool()
 async def check_system_status() -> str:
-    """Check PatientBridge system status: LLM provider, FHIR connection, and configuration."""
+    """Check PatientSynapse system status: LLM provider, FHIR connection, and configuration."""
     from server.config import get_settings
     settings = get_settings()
     return json.dumps({

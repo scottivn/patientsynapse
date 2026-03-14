@@ -45,3 +45,6 @@ Thumbs.db
 
 # Archive (kept locally, never push)
 _archive/
+
+# Fax testing
+IncomingFaxes/

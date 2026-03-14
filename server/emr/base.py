@@ -10,12 +10,13 @@ class AuthMethod(str, Enum):
     ASYMMETRIC_JWT = "private_key_jwt"       # eCW, Epic
     CLIENT_SECRET = "client_secret_basic"    # Athena, some others
     CLIENT_SECRET_POST = "client_secret_post"
+    CLIENT_CREDENTIALS = "client_credentials"  # 2-legged (no user login)
 
 
 class EMRProvider(ABC):
     """Contract every EMR integration must implement.
 
-    PatientBridge talks FHIR R4 regardless of EMR. This class captures the
+    PatientSynapse talks FHIR R4 regardless of EMR. This class captures the
     differences: OAuth endpoints, allowed scopes, auth method, and any
     EMR-specific resource quirks.
     """
@@ -64,6 +65,11 @@ class EMRProvider(ABC):
     def client_secret(self) -> Optional[str]:
         """Client secret (for client_secret_basic / client_secret_post)."""
         return None
+
+    @property
+    def system_scopes(self) -> list[str]:
+        """Scopes for 2-legged (client_credentials) auth. Override per EMR."""
+        return []
 
     @property
     def jwks_url(self) -> Optional[str]:

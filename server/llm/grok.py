@@ -26,6 +26,8 @@ class GrokProvider(LLMProvider):
         response_format: Optional[str] = None,
     ) -> LLMResponse:
         settings = get_settings()
+        if not settings.xai_api_key:
+            raise ValueError("XAI_API_KEY not set in .env — add your Grok API key to process faxes")
         headers = {
             "Authorization": f"Bearer {settings.xai_api_key}",
             "Content-Type": "application/json",

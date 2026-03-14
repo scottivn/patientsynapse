@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Save, RefreshCw, CheckCircle2, XCircle, ExternalLink, Shield, Cpu, Server, Building2 } from 'lucide-react'
-import { getAuthStatus, getStatus, loginAuth } from '../services/api'
+import { Save, RefreshCw, CheckCircle2, XCircle, ExternalLink, Shield, Cpu, Server, Building2, Zap } from 'lucide-react'
+import { getAuthStatus, getStatus, loginAuth, switchEMR, connectService } from '../services/api'
 
 const EMR_OPTIONS = [
   { value: 'ecw', label: 'eClinicalWorks', desc: 'SMART on FHIR, asymmetric JWT auth' },
@@ -18,6 +18,8 @@ export default function Settings() {
   const [auth, setAuth] = useState(null)
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [switching, setSwitching] = useState(false)
+  const [connecting, setConnecting] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -32,9 +34,45 @@ export default function Settings() {
   const handleLogin = async () => {
     try {
       const data = await loginAuth()
-      if (data.authorization_url) window.open(data.authorization_url, '_blank')
+      if (data.authorize_url) window.open(data.authorize_url, '_blank')
     } catch (err) {
       alert(err.message)
+    }
+  }
+
+  const handleSwitchEMR = async (provider) => {
+    if (status?.emr_provider_key === provider) return
+    setSwitching(true)
+    try {
+      const result = await switchEMR(provider)
+      // Refresh status + auth after switch
+      const [a, s] = await Promise.all([
+        getAuthStatus().catch(() => null),
+        getStatus().catch(() => null),
+      ])
+      setAuth(a)
+      setStatus(s)
+    } catch (err) {
+      alert(`Switch failed: ${err.message}`)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  const handleServiceConnect = async () => {
+    setConnecting(true)
+    try {
+      await connectService()
+      const [a, s] = await Promise.all([
+        getAuthStatus().catch(() => null),
+        getStatus().catch(() => null),
+      ])
+      setAuth(a)
+      setStatus(s)
+    } catch (err) {
+      alert(`Service connect failed: ${err.message}`)
+    } finally {
+      setConnecting(false)
     }
   }
 
@@ -55,23 +93,29 @@ export default function Settings() {
           <h2 className="font-semibold text-gray-900">EMR Provider</h2>
         </div>
         <p className="text-sm text-gray-500 mb-4">
-          The active EMR is controlled via the <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">EMR_PROVIDER</code> environment variable.
-          Restart the server after changing it.
+          Click a card below to switch EMR providers instantly — no server restart needed.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {EMR_OPTIONS.map((opt) => {
             const active = status?.emr_provider_key === opt.value
             return (
-              <div
+              <button
                 key={opt.value}
-                className={`border rounded-lg px-4 py-3 ${active ? 'border-brand-400 bg-brand-50' : 'border-gray-200'}`}
+                onClick={() => handleSwitchEMR(opt.value)}
+                disabled={switching || active}
+                className={`border rounded-lg px-4 py-3 text-left transition-all ${
+                  active
+                    ? 'border-brand-400 bg-brand-50 ring-2 ring-brand-200'
+                    : 'border-gray-200 hover:border-brand-300 hover:bg-gray-50 cursor-pointer'
+                } ${switching ? 'opacity-60' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <p className={`font-medium text-sm ${active ? 'text-brand-700' : 'text-gray-700'}`}>{opt.label}</p>
                   {active && <span className="badge-success text-xs">Active</span>}
+                  {switching && !active && <RefreshCw size={14} className="animate-spin text-gray-400" />}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">{opt.desc}</p>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -99,6 +143,10 @@ export default function Settings() {
           <button onClick={handleLogin} className="btn-primary text-sm flex items-center gap-2">
             <ExternalLink size={14} />
             {connected ? 'Reconnect' : `Connect to ${emrName}`}
+          </button>
+          <button onClick={handleServiceConnect} disabled={connecting} className="btn-primary text-sm flex items-center gap-2 bg-amber-600 hover:bg-amber-700">
+            <Zap size={14} />
+            {connecting ? 'Connecting...' : 'Service Connect (2-legged)'}
           </button>
         </div>
 

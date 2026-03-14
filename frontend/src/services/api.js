@@ -1,5 +1,5 @@
 /**
- * PatientBridge API client.
+ * PatientSynapse API client.
  * All backend calls go through here for a single point of control.
  */
 
@@ -21,6 +21,7 @@ async function request(path, options = {}) {
 export const getAuthStatus = () => request('/auth/status');
 export const getLoginUrl = () => request('/auth/login');
 export const loginAuth = getLoginUrl;
+export const connectService = () => request('/auth/connect-service', { method: 'POST' });
 
 // Referrals
 export const uploadReferralFile = async (file) => {
@@ -37,8 +38,13 @@ export const uploadReferralText = (text, filename) =>
     body: JSON.stringify({ text, filename }),
   });
 
-export const listReferrals = (status) =>
-  request(`/referrals${status ? `?status=${status}` : ''}`);
+export const listReferrals = (status, docType) => {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (docType) params.set('doc_type', docType);
+  const qs = params.toString();
+  return request(`/referrals${qs ? `?${qs}` : ''}`);
+};
 
 export const getReferral = (id) => request(`/referrals/${id}`);
 
@@ -68,3 +74,16 @@ export const getPatientBilling = (patientId) => request(`/rcm/patient/${patientI
 // System
 export const getSystemStatus = () => request('/status');
 export const getStatus = getSystemStatus;
+
+// Settings — EMR hot-swap
+export const getEMRConfig = () => request('/settings/emr');
+export const switchEMR = (provider) =>
+  request('/settings/emr', {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  });
+
+// Fax Ingestion (simulate eCW fax API)
+export const pollFaxes = () => request('/faxes/poll', { method: 'POST' });
+export const getFaxStatus = () => request('/faxes/status');
+export const resetFaxInbox = () => request('/faxes/reset', { method: 'POST' });

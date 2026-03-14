@@ -1,49 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
-  <!-- Background -->
-  <rect width="400" height="120" fill="none"/>
-  
-  <!-- Bridge Icon -->
-  <g transform="translate(20, 30)">
-    <!-- Left pillar -->
-    <rect x="0" y="25" width="8" height="35" fill="#2563eb" rx="2"/>
-    <!-- Right pillar -->
-    <rect x="52" y="25" width="8" height="35" fill="#2563eb" rx="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 120" width="500" height="120">
+  <defs>
+    <linearGradient id="synGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="pulseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Synapse Icon -->
+  <g transform="translate(18, 16)">
+    <!-- Left neuron body -->
+    <circle cx="12" cy="42" r="12" fill="#6366f1" opacity="0.9"/>
+    <circle cx="12" cy="42" r="7" fill="#818cf8"/>
     
-    <!-- Bridge arch -->
-    <path d="M 4 25 Q 30 5, 56 25" stroke="#0ea5e9" stroke-width="8" fill="none" stroke-linecap="round"/>
+    <!-- Left dendrites -->
+    <line x1="4" y1="28" x2="0" y2="20" stroke="#6366f1" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <line x1="12" y1="30" x2="12" y2="20" stroke="#6366f1" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <line x1="20" y1="32" x2="26" y2="22" stroke="#6366f1" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
     
-    <!-- Medical cross on bridge -->
-    <g transform="translate(30, 18)">
-      <rect x="-2" y="-8" width="4" height="16" fill="#10b981" rx="1"/>
-      <rect x="-6" y="-4" width="12" height="4" fill="#10b981" rx="1"/>
+    <!-- Axon (connection arc) -->
+    <path d="M 24 42 C 36 42, 38 24, 50 24" stroke="url(#pulseGrad)" stroke-width="4" fill="none" stroke-linecap="round"/>
+    
+    <!-- Synaptic gap — electric signal -->
+    <line x1="50" y1="24" x2="56" y2="24" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 3"/>
+    <circle cx="53" cy="24" r="3" fill="#10b981" opacity="0.5"/>
+    
+    <!-- Right axon terminal -->
+    <path d="M 56 24 C 62 24, 64 42, 76 42" stroke="url(#pulseGrad)" stroke-width="4" fill="none" stroke-linecap="round"/>
+    
+    <!-- Right neuron body -->
+    <circle cx="88" cy="42" r="12" fill="#06b6d4" opacity="0.9"/>
+    <circle cx="88" cy="42" r="7" fill="#22d3ee"/>
+    
+    <!-- Right dendrites -->
+    <line x1="96" y1="32" x2="100" y2="22" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+    <line x1="88" y1="30" x2="88" y2="20" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <line x1="80" y1="28" x2="74" y2="20" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    
+    <!-- Medical cross centered below gap -->
+    <g transform="translate(50, 50)">
+      <rect x="-2" y="-7" width="4" height="14" fill="#10b981" rx="1"/>
+      <rect x="-5" y="-3.5" width="10" height="4" fill="#10b981" rx="1"/>
     </g>
     
-    <!-- Connection dots -->
-    <circle cx="-8" cy="35" r="4" fill="#0ea5e9" opacity="0.6"/>
-    <circle cx="68" cy="35" r="4" fill="#0ea5e9" opacity="0.6"/>
-    
-    <!-- Document icon (left side) -->
-    <g transform="translate(-15, 32)">
-      <rect x="0" y="0" width="10" height="14" fill="#94a3b8" rx="1"/>
-      <line x1="2" y1="4" x2="8" y2="4" stroke="white" stroke-width="1"/>
-      <line x1="2" y1="7" x2="8" y2="7" stroke="white" stroke-width="1"/>
-      <line x1="2" y1="10" x2="6" y2="10" stroke="white" stroke-width="1"/>
-    </g>
-    
-    <!-- Patient icon (right side) -->
-    <g transform="translate(65, 32)">
-      <circle cx="5" cy="3" r="3" fill="#94a3b8"/>
-      <path d="M 0 14 Q 0 8, 5 8 Q 10 8, 10 14 Z" fill="#94a3b8"/>
-    </g>
+    <!-- Signal particles -->
+    <circle cx="35" cy="34" r="1.5" fill="#10b981" opacity="0.7"/>
+    <circle cx="44" cy="26" r="1.5" fill="#10b981" opacity="0.9"/>
+    <circle cx="62" cy="26" r="1.5" fill="#10b981" opacity="0.9"/>
+    <circle cx="70" cy="34" r="1.5" fill="#10b981" opacity="0.7"/>
   </g>
-  
-  <!-- Text: PatientBridge -->
-  <text x="110" y="55" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#1e293b">
-    Patient<tspan fill="#2563eb">Bridge</tspan>
+
+  <!-- Text: PatientSynapse -->
+  <text x="135" y="58" font-family="'Segoe UI', Arial, sans-serif" font-size="32" font-weight="700" fill="#1e293b">
+    Patient<tspan fill="#6366f1">Synapse</tspan>
   </text>
-  
+
   <!-- Tagline -->
-  <text x="110" y="78" font-family="Arial, sans-serif" font-size="13" fill="#64748b" letter-spacing="0.5">
-    Connecting Care, Streamlining Workflow
+  <text x="135" y="82" font-family="'Segoe UI', Arial, sans-serif" font-size="12.5" fill="#64748b" letter-spacing="0.5">
+    Intelligent Connections Between Every Point of Care
   </text>
 </svg>

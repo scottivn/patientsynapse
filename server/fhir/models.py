@@ -1,4 +1,4 @@
-"""Pydantic models for FHIR R4 resources used by PatientBridge."""
+"""Pydantic models for FHIR R4 resources used by PatientSynapse."""
 
 from pydantic import BaseModel, Field
 from typing import Optional, List

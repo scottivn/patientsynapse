@@ -94,7 +94,7 @@ class SMARTAuth:
                     "kty": "RSA",
                     "use": "sig",
                     "alg": "RS384",
-                    "kid": "patientbridge-1",
+                    "kid": "patientsynapse-1",
                     "n": _b64url(pub_numbers.n, 256),
                     "e": _b64url(pub_numbers.e, 3),
                 }
@@ -104,6 +104,7 @@ class SMARTAuth:
     # ---- OAuth2 URL / token helpers ----
 
     def get_authorize_url(self, state: Optional[str] = None) -> str:
+        from urllib.parse import urlencode
         state = state or str(uuid.uuid4())
         params = {
             "response_type": "code",
@@ -113,8 +114,7 @@ class SMARTAuth:
             "state": state,
             "aud": self.emr.fhir_base_url,
         }
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        return f"{self.emr.authorize_url}?{query}"
+        return f"{self.emr.authorize_url}?{urlencode(params)}"
 
     def _build_token_data(self, **extra) -> dict:
         """Build token endpoint POST body with the correct auth method."""
@@ -151,10 +151,41 @@ class SMARTAuth:
             payload,
             self._private_key,
             algorithm="RS384",
-            headers={"kid": "patientbridge-1"},
+            headers={"kid": "patientsynapse-1"},
         )
 
     # ---- Token exchange/refresh ----
+
+    async def client_credentials_connect(self) -> TokenSet:
+        """2-legged auth: obtain a token using client_credentials grant.
+        No user login required — uses system/ scopes."""
+        scopes = self.emr.system_scopes
+        if not scopes:
+            raise ValueError(f"{self.emr.name} does not define system_scopes for 2-legged auth.")
+        data = {
+            "grant_type": "client_credentials",
+            "scope": " ".join(scopes),
+        }
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"2-legged auth: token_url={self.emr.token_url} scopes={scopes}")
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                self.emr.token_url,
+                data=data,
+                auth=(self.emr.client_id, self.emr.client_secret),
+            )
+            if not resp.is_success:
+                logger.error(f"2-legged auth failed: {resp.status_code} {resp.text}")
+            resp.raise_for_status()
+            body = resp.json()
+            self._token = TokenSet(
+                access_token=body["access_token"],
+                token_type=body.get("token_type", "Bearer"),
+                expires_in=body.get("expires_in", 3600),
+                scope=body.get("scope", ""),
+            )
+            return self._token
 
     async def exchange_code(self, code: str) -> TokenSet:
         data = self._build_token_data(

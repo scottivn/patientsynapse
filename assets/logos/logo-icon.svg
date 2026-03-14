@@ -1,25 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80">
+  <defs>
+    <linearGradient id="pulseG" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+
   <!-- Round background -->
-  <circle cx="40" cy="40" r="38" fill="#2563eb" opacity="0.1"/>
-  
-  <!-- Bridge Icon Centered -->
-  <g transform="translate(17, 20)">
-    <!-- Left pillar -->
-    <rect x="0" y="25" width="8" height="25" fill="#2563eb" rx="2"/>
-    <!-- Right pillar -->
-    <rect x="38" y="25" width="8" height="25" fill="#2563eb" rx="2"/>
-    
-    <!-- Bridge arch -->
-    <path d="M 4 25 Q 23 8, 42 25" stroke="#0ea5e9" stroke-width="7" fill="none" stroke-linecap="round"/>
-    
-    <!-- Medical cross on bridge -->
-    <g transform="translate(23, 18)">
-      <rect x="-3" y="-9" width="6" height="18" fill="#10b981" rx="1.5"/>
-      <rect x="-7.5" y="-4.5" width="15" height="6" fill="#10b981" rx="1.5"/>
+  <circle cx="40" cy="40" r="38" fill="#6366f1" opacity="0.08"/>
+
+  <!-- Synapse Icon Centered -->
+  <g transform="translate(12, 16)">
+    <!-- Left neuron -->
+    <circle cx="8" cy="26" r="7" fill="#6366f1" opacity="0.9"/>
+    <circle cx="8" cy="26" r="4" fill="#818cf8"/>
+
+    <!-- Left dendrites -->
+    <line x1="3" y1="18" x2="1" y2="12" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+    <line x1="8" y1="19" x2="8" y2="11" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+    <line x1="13" y1="20" x2="16" y2="13" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+
+    <!-- Axon left -->
+    <path d="M 15 26 C 22 26, 22 14, 27 14" stroke="url(#pulseG)" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+    <!-- Synaptic gap -->
+    <circle cx="29" cy="14" r="2" fill="#10b981" opacity="0.5"/>
+
+    <!-- Axon right -->
+    <path d="M 31 14 C 36 14, 36 26, 43 26" stroke="url(#pulseG)" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+    <!-- Right neuron -->
+    <circle cx="50" cy="26" r="7" fill="#06b6d4" opacity="0.9"/>
+    <circle cx="50" cy="26" r="4" fill="#22d3ee"/>
+
+    <!-- Right dendrites -->
+    <line x1="55" y1="20" x2="57" y2="13" stroke="#06b6d4" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="50" y1="19" x2="50" y2="11" stroke="#06b6d4" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+    <line x1="45" y1="18" x2="42" y2="12" stroke="#06b6d4" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+
+    <!-- Medical cross below -->
+    <g transform="translate(28, 32)">
+      <rect x="-1.5" y="-4.5" width="3" height="9" fill="#10b981" rx="0.8"/>
+      <rect x="-3" y="-2.5" width="6" height="3" fill="#10b981" rx="0.8"/>
     </g>
-    
-    <!-- Connection pulse effect -->
-    <circle cx="-6" cy="37" r="3" fill="#0ea5e9" opacity="0.7"/>
-    <circle cx="52" cy="37" r="3" fill="#0ea5e9" opacity="0.7"/>
+
+    <!-- Signal particles -->
+    <circle cx="20" cy="20" r="1" fill="#10b981" opacity="0.7"/>
+    <circle cx="38" cy="20" r="1" fill="#10b981" opacity="0.7"/>
   </g>
 </svg>
