@@ -75,6 +75,63 @@ Return ONLY valid JSON, no markdown or explanation.""",
         import json
         return json.loads(response.content)
 
+    async def extract_prescription_data(self, text: str) -> dict:
+        """Extract structured data from a DME prescription document."""
+        messages = [
+            LLMMessage(
+                role="system",
+                content="""You are a medical document processor specializing in DME (Durable Medical Equipment) prescriptions.
+Extract structured data from the prescription text.
+Return a JSON object with these fields (use null for missing data):
+{
+    "patient": {
+        "first_name": str,
+        "last_name": str,
+        "date_of_birth": "YYYY-MM-DD",
+        "phone": str
+    },
+    "prescriber": {
+        "name": str,
+        "npi": str,
+        "practice": str,
+        "phone": str,
+        "fax": str
+    },
+    "diagnosis": {
+        "code": "ICD-10 code",
+        "description": str,
+        "severity": "mild|moderate|severe" or null
+    },
+    "equipment": [
+        {
+            "description": str,
+            "hcpcs_code": str or null,
+            "category": str
+        }
+    ],
+    "clinical": {
+        "ahi": float or null,
+        "pressure_settings": str or null,
+        "compliance_note": str or null,
+        "is_resupply": boolean,
+        "notes": str or null
+    }
+}
+
+For the equipment category field, use one of these exact values:
+"CPAP Machine", "BiPAP / ASV Machine", "CPAP Mask — Full Face", "CPAP Mask — Nasal",
+"CPAP Mask — Nasal Pillow", "Mask Cushion / Pillow Replacement", "Headgear",
+"Heated Tubing", "Standard Tubing", "Water Chamber / Humidifier",
+"Filters — Disposable", "Filters — Non-Disposable", "Other Sleep DME"
+
+Return ONLY valid JSON, no markdown or explanation.""",
+            ),
+            LLMMessage(role="user", content=f"Extract data from this DME prescription:\n\n{text}"),
+        ]
+        response = await self.complete(messages, temperature=0.1, response_format="json_object")
+        import json
+        return json.loads(response.content)
+
     async def classify_document(self, text: str) -> str:
         """Classify a fax document type."""
         messages = [

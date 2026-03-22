@@ -21,15 +21,19 @@ class AthenaProvider(EMRProvider):
 
     @property
     def fhir_base_url(self) -> str:
-        return self._s.athena_fhir_base_url
+        return self._s.athena_effective_fhir_base_url
 
     @property
     def authorize_url(self) -> str:
-        return self._s.athena_authorize_url
+        return self._s.athena_effective_authorize_url
 
     @property
     def token_url(self) -> str:
-        return self._s.athena_token_url
+        return self._s.athena_effective_token_url
+
+    @property
+    def is_sandbox(self) -> bool:
+        return self._s.athena_sandbox
 
     @property
     def client_id(self) -> str:
@@ -84,8 +88,8 @@ class AthenaProvider(EMRProvider):
     def system_scopes(self) -> list[str]:
         """2-legged scopes for client_credentials (no user login).
         SMART v2 granular format: .rs = read+search.
-        NOTE: Add 'athena/service/Athenanet.MDP' here once it propagates
-        in the Athena developer portal (can take 15-30 min after saving)."""
+        Write scopes (.cud) require explicit approval in the Athena developer
+        portal — add them here once your app registration includes write access."""
         return [
             "system/Patient.rs",
             "system/AllergyIntolerance.rs",

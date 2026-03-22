@@ -4,7 +4,7 @@ import logging
 import json
 from pathlib import Path
 from typing import Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
 
@@ -20,6 +20,7 @@ from server.fhir.resources import (
     CoverageResource,
 )
 from server.fhir import models
+from server.db import db_execute, db_fetch_one, db_fetch_all
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,53 @@ class ReferralRecord:
     raw_text: Optional[str] = None  # OCR text for non-referral docs
 
 
+def _row_to_record(row: dict) -> ReferralRecord:
+    """Convert a DB row dict to a ReferralRecord."""
+    extracted = None
+    if row.get("extracted_data"):
+        try:
+            extracted = ExtractedReferral(**json.loads(row["extracted_data"]))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return ReferralRecord(
+        id=row["id"],
+        filename=row["filename"],
+        status=ReferralStatus(row["status"]),
+        uploaded_at=row["uploaded_at"],
+        document_type=row.get("document_type", "referral"),
+        extracted_data=extracted,
+        patient_id=row.get("patient_id"),
+        service_request_id=row.get("service_request_id"),
+        error=row.get("error"),
+        reviewed_by=row.get("reviewed_by"),
+        completed_at=row.get("completed_at"),
+        raw_text=row.get("raw_text"),
+    )
+
+
+async def _save_record(record: ReferralRecord) -> None:
+    """Upsert a referral record to the database."""
+    extracted_json = None
+    if record.extracted_data:
+        extracted_json = json.dumps(asdict(record.extracted_data))
+    await db_execute(
+        """INSERT INTO referrals (id, filename, status, uploaded_at, document_type,
+               extracted_data, patient_id, service_request_id, error, reviewed_by,
+               completed_at, raw_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+               status=excluded.status, document_type=excluded.document_type,
+               extracted_data=excluded.extracted_data, patient_id=excluded.patient_id,
+               service_request_id=excluded.service_request_id, error=excluded.error,
+               reviewed_by=excluded.reviewed_by, completed_at=excluded.completed_at,
+               raw_text=excluded.raw_text""",
+        (record.id, record.filename, record.status.value, record.uploaded_at,
+         record.document_type, extracted_json, record.patient_id,
+         record.service_request_id, record.error, record.reviewed_by,
+         record.completed_at, record.raw_text),
+    )
+
+
 class ReferralService:
     """Processes referral faxes: OCR -> LLM extract -> FHIR create."""
 
@@ -89,8 +137,6 @@ class ReferralService:
         self.communications = CommunicationResource(fhir_client)
         self.coverage = CoverageResource(fhir_client)
         self.llm = get_llm()
-        # In-memory store (swap with DB later)
-        self._referrals: dict[str, ReferralRecord] = {}
 
     async def process_fax(self, fax_text: str, filename: str) -> ReferralRecord:
         """Full pipeline: extract -> match -> create."""
@@ -102,7 +148,7 @@ class ReferralService:
             status=ReferralStatus.PROCESSING,
             uploaded_at=datetime.utcnow().isoformat(),
         )
-        self._referrals[ref_id] = record
+        await _save_record(record)
 
         try:
             # Step 1: LLM extraction
@@ -116,6 +162,7 @@ class ReferralService:
             record.status = ReferralStatus.FAILED
             record.error = str(e)
 
+        await _save_record(record)
         return record
 
     async def classify_and_process(self, fax_text: str, filename: str) -> ReferralRecord:
@@ -128,7 +175,7 @@ class ReferralService:
             status=ReferralStatus.PROCESSING,
             uploaded_at=datetime.utcnow().isoformat(),
         )
-        self._referrals[ref_id] = record
+        await _save_record(record)
 
         try:
             # Step 1: Classify the document
@@ -155,11 +202,12 @@ class ReferralService:
             record.status = ReferralStatus.FAILED
             record.error = str(e)
 
+        await _save_record(record)
         return record
 
     async def approve_and_push(self, ref_id: str, overrides: Optional[dict] = None) -> ReferralRecord:
         """After human review, push extracted data to eCW via FHIR."""
-        record = self._referrals.get(ref_id)
+        record = await self.get_referral(ref_id)
         if not record:
             raise ValueError(f"Referral {ref_id} not found")
         if record.status not in (ReferralStatus.REVIEW, ReferralStatus.APPROVED):
@@ -226,19 +274,23 @@ class ReferralService:
             except Exception:
                 pass  # Best effort
 
+        await _save_record(record)
         return record
 
     async def _match_or_create_patient(self, data: ExtractedReferral) -> models.Patient:
         """Search for existing patient, create if not found."""
         if data.patient_last_name and data.patient_first_name and data.patient_dob:
-            matches = await self.patients.search_by_name_dob(
-                family=data.patient_last_name,
-                given=data.patient_first_name,
-                birthdate=data.patient_dob,
-            )
-            if matches:
-                logger.info(f"Patient match found: {matches[0].id}")
-                return matches[0]
+            try:
+                matches = await self.patients.search_by_name_dob(
+                    family=data.patient_last_name,
+                    given=data.patient_first_name,
+                    birthdate=data.patient_dob,
+                )
+                if matches:
+                    logger.info(f"Patient match found: {matches[0].id}")
+                    return matches[0]
+            except Exception as e:
+                logger.warning(f"Patient search failed ({e}), will create new patient")
 
         # No match — create new patient
         patient = models.Patient(
@@ -289,11 +341,18 @@ class ReferralService:
             notes=r.get("notes"),
         )
 
-    def get_referral(self, ref_id: str) -> Optional[ReferralRecord]:
-        return self._referrals.get(ref_id)
+    async def get_referral(self, ref_id: str) -> Optional[ReferralRecord]:
+        row = await db_fetch_one("SELECT * FROM referrals WHERE id = ?", (ref_id,))
+        return _row_to_record(row) if row else None
 
-    def list_referrals(self, status: Optional[ReferralStatus] = None) -> list[ReferralRecord]:
-        refs = list(self._referrals.values())
+    async def list_referrals(self, status: Optional[ReferralStatus] = None) -> list[ReferralRecord]:
         if status:
-            refs = [r for r in refs if r.status == status]
-        return sorted(refs, key=lambda r: r.uploaded_at, reverse=True)
+            rows = await db_fetch_all(
+                "SELECT * FROM referrals WHERE status = ? ORDER BY uploaded_at DESC",
+                (status.value,),
+            )
+        else:
+            rows = await db_fetch_all(
+                "SELECT * FROM referrals ORDER BY uploaded_at DESC"
+            )
+        return [_row_to_record(r) for r in rows]

@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from server.db import db_execute, db_fetch_one, db_fetch_all
 from server.services.ocr import extract_text_from_pdf, extract_text_from_image
 from server.services.referral import ReferralService, ReferralRecord
 
@@ -21,17 +22,26 @@ class FaxIngestionService:
     def __init__(self, inbox_dir: str, referral_service: ReferralService):
         self.inbox_dir = Path(inbox_dir)
         self.referral_service = referral_service
-        # Track files we've already processed (filename -> referral_id)
-        self._processed: dict[str, str] = {}
         self._polling: bool = False
         self._poll_task: Optional[asyncio.Task] = None
 
-    @property
-    def processed_count(self) -> int:
-        return len(self._processed)
+    async def _get_processed_count(self) -> int:
+        row = await db_fetch_one("SELECT COUNT(*) as cnt FROM fax_processed")
+        return row["cnt"] if row else 0
 
-    @property
-    def pending_files(self) -> list[str]:
+    async def _is_processed(self, filename: str) -> bool:
+        row = await db_fetch_one(
+            "SELECT filename FROM fax_processed WHERE filename = ?", (filename,)
+        )
+        return row is not None
+
+    async def _mark_processed(self, filename: str, result_id: str) -> None:
+        await db_execute(
+            "INSERT OR IGNORE INTO fax_processed (filename, result_id) VALUES (?, ?)",
+            (filename, result_id),
+        )
+
+    async def _get_pending_files(self) -> list[str]:
         """Files in inbox that haven't been processed yet."""
         if not self.inbox_dir.exists():
             return []
@@ -39,19 +49,19 @@ class FaxIngestionService:
             f.name for f in self.inbox_dir.iterdir()
             if f.is_file() and f.suffix.lower() in (".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif")
         ]
-        return [f for f in all_files if f not in self._processed]
+        pending = []
+        for f in all_files:
+            if not await self._is_processed(f):
+                pending.append(f)
+        return pending
 
     async def poll_once(self) -> list[ReferralRecord]:
-        """Scan inbox directory and process any new fax files.
-
-        This simulates an API call to eCW's fax service — instead of hitting
-        a remote endpoint, we read from IncomingFaxes/ on disk.
-        """
+        """Scan inbox directory and process any new fax files."""
         if not self.inbox_dir.exists():
             logger.warning(f"Inbox directory not found: {self.inbox_dir}")
             return []
 
-        new_files = self.pending_files
+        new_files = await self._get_pending_files()
         if not new_files:
             logger.info("No new faxes in inbox")
             return []
@@ -63,13 +73,12 @@ class FaxIngestionService:
             file_path = self.inbox_dir / filename
             try:
                 record = await self._process_file(file_path)
-                self._processed[filename] = record.id
+                await self._mark_processed(filename, record.id)
                 results.append(record)
                 logger.info(f"Processed fax {filename} -> referral {record.id} ({record.status.value})")
             except Exception as e:
                 logger.error(f"Failed to process fax {filename}: {e}")
-                # Mark as processed to avoid retrying broken files forever
-                self._processed[filename] = f"error:{e}"
+                await self._mark_processed(filename, f"error:{e}")
 
         return results
 
@@ -116,14 +125,18 @@ class FaxIngestionService:
                 logger.error(f"Fax poll error: {e}")
             await asyncio.sleep(interval)
 
-    def get_status(self) -> dict:
+    async def get_status(self) -> dict:
         """Return current ingestion status."""
+        processed_count = await self._get_processed_count()
+        pending_files = await self._get_pending_files()
+        rows = await db_fetch_all("SELECT filename, result_id FROM fax_processed")
+        processed_files = {r["filename"]: r["result_id"] for r in rows}
         return {
             "inbox_dir": str(self.inbox_dir),
             "inbox_exists": self.inbox_dir.exists(),
             "total_files": len(list(self.inbox_dir.iterdir())) if self.inbox_dir.exists() else 0,
-            "processed": self.processed_count,
-            "pending": len(self.pending_files),
+            "processed": processed_count,
+            "pending": len(pending_files),
             "polling_active": self._polling,
-            "processed_files": {k: v for k, v in self._processed.items()},
+            "processed_files": processed_files,
         }

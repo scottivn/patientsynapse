@@ -176,7 +176,7 @@ class SMARTAuth:
                 auth=(self.emr.client_id, self.emr.client_secret),
             )
             if not resp.is_success:
-                logger.error(f"2-legged auth failed: {resp.status_code} {resp.text}")
+                logger.error(f"2-legged auth failed: {resp.status_code} body={resp.text} scopes={scopes}")
             resp.raise_for_status()
             body = resp.json()
             self._token = TokenSet(
