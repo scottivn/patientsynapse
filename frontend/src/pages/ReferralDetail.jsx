@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, XCircle, User, Stethoscope, FileText, AlertTriangle, Tag } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
+import ErrorBanner from '../components/ErrorBanner'
 import { getReferral, approveReferral, rejectReferral } from '../services/api'
 
 const DOC_TYPE_STYLES = {
@@ -18,11 +19,14 @@ export default function ReferralDetail() {
   const [referral, setReferral] = useState(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
+  const [error, setError] = useState(null)
+  const [showRejectModal, setShowRejectModal] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
 
   useEffect(() => {
     getReferral(id)
       .then(setReferral)
-      .catch(() => navigate('/referrals'))
+      .catch((e) => setError(`Failed to load referral: ${e.message}`))
       .finally(() => setLoading(false))
   }, [id])
 
@@ -32,24 +36,30 @@ export default function ReferralDetail() {
       const updated = await approveReferral(id)
       setReferral(updated)
     } catch (err) {
-      alert(err.message)
+      setError(`Approve failed: ${err.message}`)
     }
     setActing(false)
   }
 
   const handleReject = async () => {
-    const reason = prompt('Rejection reason (optional):')
     setActing(true)
+    setShowRejectModal(false)
     try {
-      const updated = await rejectReferral(id, reason)
+      const updated = await rejectReferral(id, rejectReason)
       setReferral(updated)
+      setRejectReason('')
     } catch (err) {
-      alert(err.message)
+      setError(`Reject failed: ${err.message}`)
     }
     setActing(false)
   }
 
   if (loading) return <p className="text-gray-500 text-center py-12">Loading...</p>
+  if (!referral && error) return (
+    <div className="space-y-4 py-12">
+      <ErrorBanner message={error} onDismiss={() => navigate(-1)} />
+    </div>
+  )
   if (!referral) return null
 
   const d = referral.extracted_data || {}
@@ -61,7 +71,7 @@ export default function ReferralDetail() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate('/referrals')} className="p-2 hover:bg-gray-100 rounded-lg">
+        <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-lg">
           <ArrowLeft size={18} />
         </button>
         <div className="flex-1">
@@ -80,13 +90,15 @@ export default function ReferralDetail() {
               <CheckCircle2 size={16} />
               Approve & Push to EMR
             </button>
-            <button onClick={handleReject} disabled={acting} className="btn-danger flex items-center gap-2">
+            <button onClick={() => setShowRejectModal(true)} disabled={acting} className="btn-danger flex items-center gap-2">
               <XCircle size={16} />
               Reject
             </button>
           </div>
         )}
       </div>
+
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
       {referral.error && (
         <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 flex items-center gap-3">
@@ -198,6 +210,27 @@ export default function ReferralDetail() {
           </div>
         </div>
       </div>
+
+      {/* Reject modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowRejectModal(false)}>
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Reject Referral</h3>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Rejection reason (optional)"
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowRejectModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+              <button onClick={handleReject} className="btn-danger">Reject</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

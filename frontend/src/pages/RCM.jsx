@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { DollarSign, TrendingUp, PieChart, Users, RefreshCw } from 'lucide-react'
 import StatCard from '../components/StatCard'
-import { getRCMDashboard, getPatientBilling } from '../services/api'
+import ErrorBanner from '../components/ErrorBanner'
+import { getRCMDashboard, getPatientBilling, getStatus } from '../services/api'
 
 export default function RCM() {
   const [dashboard, setDashboard] = useState(null)
@@ -9,11 +10,16 @@ export default function RCM() {
   const [billing, setBilling] = useState(null)
   const [loading, setLoading] = useState(true)
   const [lookingUp, setLookingUp] = useState(false)
+  const [emrName, setEmrName] = useState('EMR')
+  const [error, setError] = useState(null)
 
   useEffect(() => {
+    getStatus()
+      .then((s) => setEmrName(s?.emr_provider || 'EMR'))
+      .catch(() => {})
     getRCMDashboard()
       .then(setDashboard)
-      .catch(() => {})
+      .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
 
@@ -21,10 +27,11 @@ export default function RCM() {
     e.preventDefault()
     if (!patientId.trim()) return
     setLookingUp(true)
+    setError(null)
     try {
       setBilling(await getPatientBilling(patientId))
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
     }
     setLookingUp(false)
   }
@@ -37,30 +44,32 @@ export default function RCM() {
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Revenue Cycle Management</h1>
 
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Referrals Processed"
           value={d.referrals_processed ?? '—'}
-          icon={<RefreshCw size={20} />}
+          icon={RefreshCw}
         />
         <StatCard
           label="Pending Review"
           value={d.referrals_pending ?? '—'}
-          icon={<Users size={20} />}
-          variant="warning"
+          icon={Users}
+          color="amber"
         />
         <StatCard
-          label="Pushed to eCW"
+          label={`Pushed to ${emrName}`}
           value={d.referrals_approved ?? '—'}
-          icon={<TrendingUp size={20} />}
-          variant="success"
+          icon={TrendingUp}
+          color="green"
         />
         <StatCard
           label="Rejected"
           value={d.referrals_rejected ?? '—'}
-          icon={<DollarSign size={20} />}
-          variant="danger"
+          icon={DollarSign}
+          color="red"
         />
       </div>
 
@@ -113,7 +122,7 @@ export default function RCM() {
               <input
                 value={patientId}
                 onChange={(e) => setPatientId(e.target.value)}
-                placeholder="eCW Patient ID"
+                placeholder={`${emrName} Patient ID`}
                 className="input pl-10"
               />
             </div>

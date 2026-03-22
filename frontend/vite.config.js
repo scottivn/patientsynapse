@@ -8,6 +8,9 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8443',
       '/.well-known': 'http://localhost:8443',
+      '/docs': 'http://localhost:8443',
+      '/redoc': 'http://localhost:8443',
+      '/openapi.json': 'http://localhost:8443',
     },
   },
 })
