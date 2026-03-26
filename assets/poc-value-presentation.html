@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PatientSynapse — ROI & Value Overview</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --blue-900: #1e3a5f;
+    --blue-700: #2563eb;
+    --blue-600: #3b82f6;
+    --blue-500: #60a5fa;
+    --blue-100: #dbeafe;
+    --blue-50: #eff6ff;
+    --green-700: #15803d;
+    --green-600: #16a34a;
+    --green-100: #dcfce7;
+    --green-50: #f0fdf4;
+    --red-600: #dc2626;
+    --red-100: #fee2e2;
+    --amber-600: #d97706;
+    --amber-100: #fef3c7;
+    --gray-900: #111827;
+    --gray-700: #374151;
+    --gray-500: #6b7280;
+    --gray-300: #d1d5db;
+    --gray-100: #f3f4f6;
+    --gray-50: #f9fafb;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--gray-900);
+    background: #fff;
+    line-height: 1.6;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @media print {
+    .page-break { page-break-before: always; }
+    body { font-size: 11pt; }
+    .no-print { display: none; }
+  }
+
+  .container { max-width: 1000px; margin: 0 auto; padding: 0 32px; }
+
+  /* ── Hero ─────────────────────────────────────────── */
+  .hero {
+    background: linear-gradient(135deg, var(--blue-900) 0%, #0f2847 100%);
+    color: #fff;
+    padding: 60px 0 50px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .hero .container { position: relative; z-index: 1; }
+  .hero-logo { height: 36px; margin-bottom: 32px; filter: brightness(0) invert(1); }
+  .hero h1 { font-size: 2.4rem; font-weight: 800; line-height: 1.2; margin-bottom: 12px; }
+  .hero p { font-size: 1.15rem; color: rgba(255,255,255,0.8); max-width: 640px; font-weight: 300; }
+  .hero-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+
+  /* ── Sections ─────────────────────────────────────── */
+  section { padding: 48px 0; }
+  section + section { border-top: 1px solid var(--gray-100); }
+  .section-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--blue-600);
+    margin-bottom: 8px;
+  }
+  .section-title {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: var(--gray-900);
+  }
+
+  /* ── Problem Statement ────────────────────────────── */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+  }
+  .problem-card {
+    background: var(--red-100);
+    border-radius: 12px;
+    padding: 20px 24px;
+    border-left: 4px solid var(--red-600);
+  }
+  .problem-card h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--red-600);
+    margin-bottom: 6px;
+  }
+  .problem-card p { font-size: 0.88rem; color: var(--gray-700); }
+
+  /* ── KPI Cards ────────────────────────────────────── */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin: 24px 0;
+  }
+  .kpi-card {
+    background: var(--green-50);
+    border: 1px solid var(--green-100);
+    border-radius: 12px;
+    padding: 24px 20px;
+    text-align: center;
+  }
+  .kpi-card .kpi-value {
+    font-size: 2.2rem;
+    font-weight: 800;
+    color: var(--green-700);
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .kpi-card .kpi-label {
+    font-size: 0.82rem;
+    color: var(--gray-500);
+    font-weight: 500;
+  }
+
+  /* ── Comparison Table ─────────────────────────────── */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--gray-300);
+    margin: 24px 0;
+  }
+  .comparison-col { padding: 28px; }
+  .comparison-col.before { background: var(--gray-50); }
+  .comparison-col.after { background: var(--blue-50); }
+  .comparison-col h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .comparison-col.before h3 { color: var(--gray-500); }
+  .comparison-col.after h3 { color: var(--blue-700); }
+  .comparison-col ul { list-style: none; padding: 0; }
+  .comparison-col li {
+    font-size: 0.9rem;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--gray-700);
+  }
+  .comparison-col li:last-child { border-bottom: none; }
+  .comparison-col li span.icon { flex-shrink: 0; font-size: 1rem; }
+
+  /* ── Cost Breakdown ───────────────────────────────── */
+  .cost-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 0.9rem;
+  }
+  .cost-table th {
+    background: var(--blue-900);
+    color: #fff;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .cost-table th:last-child { text-align: right; }
+  .cost-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    color: var(--gray-700);
+  }
+  .cost-table td:last-child { text-align: right; font-weight: 600; color: var(--gray-900); }
+  .cost-table tr:nth-child(even) td { background: var(--gray-50); }
+  .cost-table .total-row td {
+    background: var(--green-50) !important;
+    border-top: 2px solid var(--green-600);
+    font-weight: 700;
+    color: var(--green-700);
+    font-size: 1rem;
+  }
+  .cost-table .desc { font-size: 0.78rem; color: var(--gray-500); display: block; margin-top: 2px; }
+
+  /* ── ROI Box ──────────────────────────────────────── */
+  .roi-highlight {
+    background: linear-gradient(135deg, var(--green-50) 0%, #ecfdf5 100%);
+    border: 2px solid var(--green-600);
+    border-radius: 16px;
+    padding: 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+    margin: 28px 0;
+    text-align: center;
+  }
+  .roi-item .roi-value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--green-700);
+    line-height: 1.1;
+  }
+  .roi-item .roi-label {
+    font-size: 0.85rem;
+    color: var(--gray-500);
+    margin-top: 4px;
+    font-weight: 500;
+  }
+
+  /* ── Pipeline Visual ──────────────────────────────── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 24px 0;
+    overflow-x: auto;
+  }
+  .pipeline-step {
+    background: var(--blue-50);
+    border: 1px solid var(--blue-100);
+    border-radius: 10px;
+    padding: 16px 20px;
+    min-width: 140px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .pipeline-step .step-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .pipeline-step .step-label { font-size: 0.78rem; font-weight: 600; color: var(--blue-900); }
+  .pipeline-step .step-time { font-size: 0.72rem; color: var(--gray-500); margin-top: 2px; }
+  .pipeline-arrow {
+    font-size: 1.2rem;
+    color: var(--blue-500);
+    padding: 0 6px;
+    flex-shrink: 0;
+  }
+
+  /* ── Feature Grid ─────────────────────────────────── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .feature-item {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    background: var(--gray-50);
+    border-radius: 10px;
+  }
+  .feature-item .feat-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--blue-100);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+  .feature-item h4 { font-size: 0.9rem; font-weight: 600; color: var(--gray-900); }
+  .feature-item p { font-size: 0.8rem; color: var(--gray-500); margin-top: 2px; }
+
+  /* ── DME Section ──────────────────────────────────── */
+  .dme-flow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .dme-flow-card {
+    border: 1px solid var(--gray-300);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+  }
+  .dme-flow-card .flow-num {
+    width: 28px;
+    height: 28px;
+    background: var(--blue-600);
+    color: #fff;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .dme-flow-card h4 { font-size: 0.9rem; font-weight: 600; margin-bottom: 4px; }
+  .dme-flow-card p { font-size: 0.8rem; color: var(--gray-500); }
+
+  /* ── Security Badges ──────────────────────────────── */
+  .security-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 16px 0;
+  }
+  .sec-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--blue-50);
+    border: 1px solid var(--blue-100);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--blue-900);
+  }
+  .sec-badge .check { color: var(--green-600); }
+
+  /* ── Footer ───────────────────────────────────────── */
+  .footer {
+    background: var(--gray-50);
+    border-top: 1px solid var(--gray-100);
+    padding: 32px 0;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--gray-500);
+  }
+  .footer strong { color: var(--gray-700); }
+
+  /* ── Responsive ───────────────────────────────────── */
+  @media (max-width: 768px) {
+    .kpi-row { grid-template-columns: 1fr 1fr; }
+    .comparison { grid-template-columns: 1fr; }
+    .roi-highlight { grid-template-columns: 1fr; }
+    .problem-grid { grid-template-columns: 1fr; }
+    .feature-grid { grid-template-columns: 1fr; }
+    .dme-flow { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 1.8rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     HERO
+     ════════════════════════════════════════════════════════════ -->
+<div class="hero">
+  <div class="container">
+    <img src="logos/logo-banner.svg" alt="PatientSynapse" class="hero-logo">
+    <div class="hero-badge">Proof of Concept &mdash; Value Overview</div>
+    <h1>Eliminate Manual Fax Processing.<br>Reclaim 40+ Staff Hours per Month.</h1>
+    <p>AI-powered automation that reads referral faxes, extracts patient data, matches records, and pushes to your EMR &mdash; in seconds instead of minutes per document.</p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     THE PROBLEM
+     ════════════════════════════════════════════════════════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">The Problem</div>
+    <div class="section-title">Manual Fax Processing Is Costing You More Than You Think</div>
+    <p style="color: var(--gray-500); margin-bottom: 16px; max-width: 700px;">
+      Your practice receives 100&ndash;175 faxes daily. Each one is manually read, classified, typed into the EMR, and filed. Here's what that actually costs:
+    </p>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <h4>Staff Time</h4>
+        <p>At 3&ndash;5 minutes per fax, a staff member spends <strong>5&ndash;14 hours every day</strong> on data entry alone. That's an entire FTE consumed by copy-paste work.</p>
+      </div>
+      <div class="problem-card">
+        <h4>Data Entry Errors</h4>
+        <p>Manual transcription averages a <strong>1&ndash;3% error rate</strong> &mdash; wrong DOB, misspelled names, missed diagnosis codes. Each error creates downstream billing and scheduling problems.</p>
+      </div>
+      <div class="problem-card">
+        <h4>DME Bottleneck</h4>
+        <p>DME supply fulfillment depends on <strong>1&ndash;2 staff members</strong> making phone calls to patients and vendors. A single absence grinds the process to a halt.</p>
+      </div>
+      <div class="problem-card">
+        <h4>Delayed Patient Care</h4>
+        <p>Referrals sit in a physical inbox until someone gets to them. <strong>Urgent referrals can wait hours</strong> before being seen &mdash; a compliance and care-quality risk.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     THE SOLUTION — PIPELINE
+     ════════════════════════════════════════════════════════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">The Solution</div>
+    <div class="section-title">Fax to EMR in Under 30 Seconds</div>
+    <p style="color: var(--gray-500); margin-bottom: 20px; max-width: 700px;">
+      PatientSynapse reads every incoming fax automatically, classifies the document type, extracts structured data using medical AI, and prepares it for one-click approval into your EMR.
+    </p>
+
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="step-icon">📠</div>
+        <div class="step-label">Fax Received</div>
+        <div class="step-time">Automatic</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-icon">🔍</div>
+        <div class="step-label">OCR Scan</div>
+        <div class="step-time">~2 sec</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-icon">🤖</div>
+        <div class="step-label">AI Classification</div>
+        <div class="step-time">~1 sec</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-icon">📋</div>
+        <div class="step-label">Data Extraction</div>
+        <div class="step-time">~5 sec</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-icon">👤</div>
+        <div class="step-label">Patient Match</div>
+        <div class="step-time">~2 sec</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-icon">✅</div>
+        <div class="step-label">Staff Review</div>
+        <div class="step-time">1 click</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-icon">🏥</div>
+        <div class="step-label">In Your EMR</div>
+        <div class="step-time">Instant</div>
+      </div>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-item">
+        <div class="feat-icon">📄</div>
+        <div>
+          <h4>Smart Document Classification</h4>
+          <p>Automatically sorts referrals, lab results, insurance authorizations, and medical records</p>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feat-icon">🔗</div>
+        <div>
+          <h4>EMR Integration</h4>
+          <p>Direct FHIR R4 connection to eClinicalWorks and athenahealth &mdash; no middleware needed</p>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feat-icon">📊</div>
+        <div>
+          <h4>Referral Auth Tracking</h4>
+          <p>Tracks HMO visit counts, expiration dates, and auto-generates PCP renewal faxes</p>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feat-icon">💰</div>
+        <div>
+          <h4>Allowable Rate Lookups</h4>
+          <p>Instant insurance reimbursement pricing by payer and HCPCS code for DME orders</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     DME WORKFLOW
+     ════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <div class="container">
+    <div class="section-label">DME Fulfillment</div>
+    <div class="section-title">Replace Phone Tag with One-Click Patient Confirmation</div>
+    <p style="color: var(--gray-500); margin-bottom: 20px; max-width: 700px;">
+      Your #1 patient complaint source &mdash; DME supply orders &mdash; goes from days of phone calls to a streamlined digital workflow. Staff stops playing phone tag. Patients confirm on their own time.
+    </p>
+
+    <div class="dme-flow">
+      <div class="dme-flow-card">
+        <div class="flow-num">1</div>
+        <h4>Auto-Check Eligibility</h4>
+        <p>System verifies insurance, compliance data, and calculates expected reimbursement automatically</p>
+      </div>
+      <div class="dme-flow-card">
+        <div class="flow-num">2</div>
+        <h4>Send Patient Link</h4>
+        <p>One click sends a secure confirmation link via text or email &mdash; no phone call needed</p>
+      </div>
+      <div class="dme-flow-card">
+        <div class="flow-num">3</div>
+        <h4>Patient Confirms</h4>
+        <p>Patient verifies address, chooses pickup or shipping, and responds on their own schedule</p>
+      </div>
+      <div class="dme-flow-card">
+        <div class="flow-num">4</div>
+        <h4>Order from Vendor</h4>
+        <p>Staff orders supplies with vendor info pre-filled, tracks order through delivery</p>
+      </div>
+      <div class="dme-flow-card">
+        <div class="flow-num">5</div>
+        <h4>Track Fulfillment</h4>
+        <p>Shipping/pickup status visible to staff and patient &mdash; no &ldquo;where's my order?&rdquo; calls</p>
+      </div>
+      <div class="dme-flow-card">
+        <div class="flow-num">6</div>
+        <h4>Auto-Resupply</h4>
+        <p>System tracks replacement schedules and queues the next order automatically when it's due</p>
+      </div>
+    </div>
+
+    <div style="background: var(--amber-100); border-radius: 10px; padding: 16px 20px; margin-top: 12px;">
+      <strong style="color: var(--amber-600);">Impact:</strong>
+      <span style="color: var(--gray-700); font-size: 0.9rem;">
+        Staff handling DME orders drops from <strong>2&ndash;3 hours/day of phone calls</strong> to
+        <strong>15&ndash;30 minutes of queue management</strong>. Patients get a better experience with less waiting.
+      </span>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     TIME SAVINGS
+     ════════════════════════════════════════════════════════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Time Savings</div>
+    <div class="section-title">Before vs. After PatientSynapse</div>
+
+    <div class="comparison">
+      <div class="comparison-col before">
+        <h3><span class="icon" style="color: var(--red-600);">✕</span> Current Process</h3>
+        <ul>
+          <li><span class="icon">⏱</span> 3&ndash;5 min per fax to read, type, and file</li>
+          <li><span class="icon">⏱</span> 8&ndash;14 hrs/day total staff time on faxes</li>
+          <li><span class="icon">⏱</span> 2&ndash;3 hrs/day on DME phone calls</li>
+          <li><span class="icon">⏱</span> 30+ min to process an urgent referral</li>
+          <li><span class="icon">⏱</span> Hours to check referral auth status manually</li>
+          <li><span class="icon">⏱</span> Errors caught days later at billing</li>
+        </ul>
+      </div>
+      <div class="comparison-col after">
+        <h3><span class="icon" style="color: var(--green-600);">✓</span> With PatientSynapse</h3>
+        <ul>
+          <li><span class="icon">⚡</span> 10 seconds per fax &mdash; AI reads and extracts</li>
+          <li><span class="icon">⚡</span> 30&ndash;60 min/day for staff review and approval</li>
+          <li><span class="icon">⚡</span> 15&ndash;30 min/day for DME queue management</li>
+          <li><span class="icon">⚡</span> Urgent referrals flagged and queued instantly</li>
+          <li><span class="icon">⚡</span> Auth expiration alerts and auto-renewal requests</li>
+          <li><span class="icon">⚡</span> AI-extracted fields verified before EMR push</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-value">85%</div>
+        <div class="kpi-label">Reduction in<br>processing time</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">40+</div>
+        <div class="kpi-label">Staff hours saved<br>per month</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">&lt;30s</div>
+        <div class="kpi-label">Fax to structured<br>data in EMR</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">24/7</div>
+        <div class="kpi-label">Faxes processed<br>any time of day</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     COST BREAKDOWN
+     ════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <div class="container">
+    <div class="section-label">Total Cost of Ownership</div>
+    <div class="section-title">What PatientSynapse Actually Costs to Run</div>
+    <p style="color: var(--gray-500); margin-bottom: 20px; max-width: 700px;">
+      Complete infrastructure for one practice processing 100&ndash;175 faxes per day.
+      No per-seat licenses. No annual contracts. Just usage-based cloud costs.
+    </p>
+
+    <table class="cost-table">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Details</th>
+          <th>Monthly Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            Cloud Server
+            <span class="desc">AWS EC2 t3.small &mdash; runs the entire application</span>
+          </td>
+          <td>2 vCPU, 2 GB RAM, 24/7</td>
+          <td>$15.18</td>
+        </tr>
+        <tr>
+          <td>
+            Storage
+            <span class="desc">Server disk + fax document archive</span>
+          </td>
+          <td>20 GB base + 3&ndash;5 GB/mo faxes</td>
+          <td>$1.90 &ndash; $2.13</td>
+        </tr>
+        <tr>
+          <td>
+            Domain &amp; DNS
+            <span class="desc">patientsynapse.com on Route 53</span>
+          </td>
+          <td>Hosted zone + queries</td>
+          <td>$0.51</td>
+        </tr>
+        <tr>
+          <td>
+            SSL Certificate
+            <span class="desc">Let's Encrypt &mdash; auto-renewing TLS</span>
+          </td>
+          <td>Free</td>
+          <td>$0.00</td>
+        </tr>
+        <tr>
+          <td>
+            AI Processing
+            <span class="desc">LLM API for document classification + data extraction</span>
+          </td>
+          <td>2 AI calls per fax, 3,000&ndash;5,250/mo</td>
+          <td>$35 &ndash; $61</td>
+        </tr>
+        <tr>
+          <td>
+            OCR Engine
+            <span class="desc">Tesseract &mdash; open-source text recognition</span>
+          </td>
+          <td>Runs locally on server</td>
+          <td>$0.00</td>
+        </tr>
+        <tr>
+          <td>
+            Database
+            <span class="desc">Audit logs, user accounts, allowable rates</span>
+          </td>
+          <td>SQLite (on-disk, no separate service)</td>
+          <td>$0.00</td>
+        </tr>
+        <tr>
+          <td>
+            Data Transfer
+            <span class="desc">AWS network egress</span>
+          </td>
+          <td>Well under free tier (100 GB/mo)</td>
+          <td>$0.00</td>
+        </tr>
+        <tr class="total-row">
+          <td colspan="2">Monthly Total</td>
+          <td>$53 &ndash; $79</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="font-size: 0.82rem; color: var(--gray-500); margin-top: 8px;">
+      * AI processing is the largest variable cost and scales linearly with volume. All other costs are fixed.
+      Future optimization with task-based model routing reduces AI cost by ~10&ndash;15%.
+    </p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     ROI
+     ════════════════════════════════════════════════════════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Return on Investment</div>
+    <div class="section-title">$53&ndash;$79/month vs. What You're Spending Now</div>
+
+    <div class="roi-highlight">
+      <div class="roi-item">
+        <div class="roi-value">$880+</div>
+        <div class="roi-label">Current monthly cost<br>(staff time on fax processing)</div>
+      </div>
+      <div class="roi-item">
+        <div class="roi-value">$53&ndash;$79</div>
+        <div class="roi-label">PatientSynapse<br>total monthly cost</div>
+      </div>
+      <div class="roi-item">
+        <div class="roi-value">11&ndash;17x</div>
+        <div class="roi-label">Return on<br>investment</div>
+      </div>
+    </div>
+
+    <div style="background: var(--blue-50); border-radius: 12px; padding: 24px; margin-top: 12px;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--blue-900); margin-bottom: 12px;">How we calculated current cost:</h4>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 0.88rem; color: var(--gray-700);">
+        <div>
+          <strong>Fax processing labor</strong><br>
+          2 hrs/day &times; $20/hr &times; 22 workdays = <strong>$880/mo</strong><br>
+          <span style="color: var(--gray-500); font-size: 0.8rem;">Conservative &mdash; actual time is often 3&ndash;4+ hrs/day</span>
+        </div>
+        <div>
+          <strong>DME phone call labor</strong><br>
+          2 hrs/day &times; $20/hr &times; 22 workdays = <strong>$880/mo</strong><br>
+          <span style="color: var(--gray-500); font-size: 0.8rem;">Additional savings from DME automation not included in ROI above</span>
+        </div>
+      </div>
+    </div>
+
+    <p style="font-size: 0.9rem; color: var(--gray-700); margin-top: 20px; line-height: 1.7;">
+      <strong>Beyond the dollars:</strong> staff freed from data entry can focus on patient care, scheduling,
+      and revenue-generating activities. Faster referral processing means shorter time-to-appointment,
+      better patient satisfaction scores, and fewer referral leaks to competing practices.
+    </p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SECURITY & COMPLIANCE
+     ════════════════════════════════════════════════════════════ -->
+<section>
+  <div class="container">
+    <div class="section-label">Security &amp; Compliance</div>
+    <div class="section-title">Built for HIPAA from Day One</div>
+    <p style="color: var(--gray-500); margin-bottom: 16px; max-width: 700px;">
+      PatientSynapse handles Protected Health Information with the same rigor as your EMR.
+      Every access is logged, every connection encrypted, and patient data never leaves your infrastructure without a BAA in place.
+    </p>
+
+    <div class="security-row">
+      <div class="sec-badge"><span class="check">✓</span> TLS 1.3 Encryption</div>
+      <div class="sec-badge"><span class="check">✓</span> HIPAA Audit Logging</div>
+      <div class="sec-badge"><span class="check">✓</span> Session Timeout (15 min)</div>
+      <div class="sec-badge"><span class="check">✓</span> No PHI in Logs</div>
+      <div class="sec-badge"><span class="check">✓</span> JWT Auth (HttpOnly Cookies)</div>
+      <div class="sec-badge"><span class="check">✓</span> AWS BAA in Place</div>
+      <div class="sec-badge"><span class="check">✓</span> Role-Based Access Control</div>
+      <div class="sec-badge"><span class="check">✓</span> No PHI in Error Responses</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     POC SCOPE
+     ════════════════════════════════════════════════════════════ -->
+<section style="background: var(--gray-50);">
+  <div class="container">
+    <div class="section-label">Proof of Concept</div>
+    <div class="section-title">What the POC Will Demonstrate</div>
+
+    <div class="feature-grid">
+      <div class="feature-item" style="background: #fff;">
+        <div class="feat-icon">📠</div>
+        <div>
+          <h4>Live Fax Processing</h4>
+          <p>Upload real (de-identified) faxes and watch AI extract patient data, diagnosis codes, and referral details in seconds</p>
+        </div>
+      </div>
+      <div class="feature-item" style="background: #fff;">
+        <div class="feat-icon">🏥</div>
+        <div>
+          <h4>EMR Integration</h4>
+          <p>One-click approval pushes structured data directly into eClinicalWorks via FHIR — no re-typing</p>
+        </div>
+      </div>
+      <div class="feature-item" style="background: #fff;">
+        <div class="feat-icon">📦</div>
+        <div>
+          <h4>DME Workflow</h4>
+          <p>Full pipeline from order creation to patient confirmation to vendor ordering — no phone calls required</p>
+        </div>
+      </div>
+      <div class="feature-item" style="background: #fff;">
+        <div class="feat-icon">📱</div>
+        <div>
+          <h4>Patient Confirmation</h4>
+          <p>See the patient experience — a secure link where they confirm address and choose pickup or shipping</p>
+        </div>
+      </div>
+      <div class="feature-item" style="background: #fff;">
+        <div class="feat-icon">📊</div>
+        <div>
+          <h4>Dashboard &amp; Queues</h4>
+          <p>Staff-facing pipeline view with status tracking, auto-refill scheduling, and actionable queues</p>
+        </div>
+      </div>
+      <div class="feature-item" style="background: #fff;">
+        <div class="feat-icon">🔒</div>
+        <div>
+          <h4>Security &amp; Audit</h4>
+          <p>Login, session management, and the HIPAA audit trail — every PHI access logged with user, timestamp, and action</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     FOOTER
+     ════════════════════════════════════════════════════════════ -->
+<div class="footer">
+  <div class="container">
+    <strong>PatientSynapse</strong> &mdash; Intelligent Connections Between Every Point of Care
+    <br>
+    <span style="font-size: 0.78rem;">Confidential &mdash; Prepared for practice evaluation</span>
+  </div>
+</div>
+
+</body>
+</html>

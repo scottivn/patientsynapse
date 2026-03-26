@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Search, Shield, MapPin, Phone, Clock, ChevronRight } from 'lucide-react'
-import { searchProviders, verifyInsurance } from '../services/api'
+import { Link } from 'react-router-dom'
+import { Search, Shield, ShieldCheck, ShieldAlert, AlertTriangle, MapPin, Phone, Clock, ChevronRight } from 'lucide-react'
+import ErrorBanner from '../components/ErrorBanner'
+import { searchProviders, verifyInsurance, checkReferralAuth, getStatus } from '../services/api'
 
 export default function Scheduling() {
   const [specialty, setSpecialty] = useState('')
@@ -9,17 +11,28 @@ export default function Scheduling() {
 
   const [patientId, setPatientId] = useState('')
   const [insurance, setInsurance] = useState(null)
+  const [referralCheck, setReferralCheck] = useState(null)
   const [verifying, setVerifying] = useState(false)
+
+  const [emrName, setEmrName] = useState('EMR')
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    getStatus()
+      .then((s) => setEmrName(s?.emr_provider || 'EMR'))
+      .catch(() => {})
+  }, [])
 
   const handleSearch = async (e) => {
     e.preventDefault()
     if (!specialty.trim()) return
     setSearching(true)
+    setError(null)
     try {
       const data = await searchProviders(specialty)
       setProviders(data.providers || [])
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
     }
     setSearching(false)
   }
@@ -28,10 +41,18 @@ export default function Scheduling() {
     e.preventDefault()
     if (!patientId.trim()) return
     setVerifying(true)
+    setReferralCheck(null)
+    setError(null)
     try {
-      setInsurance(await verifyInsurance(patientId))
+      const [ins, refCheck] = await Promise.allSettled([
+        verifyInsurance(patientId),
+        checkReferralAuth(patientId),
+      ])
+      if (ins.status === 'fulfilled') setInsurance(ins.value)
+      else setError(ins.reason?.message || 'Insurance verification failed')
+      if (refCheck.status === 'fulfilled') setReferralCheck(refCheck.value)
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
     }
     setVerifying(false)
   }
@@ -39,6 +60,8 @@ export default function Scheduling() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Smart Scheduling</h1>
+
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Provider search */}
@@ -97,7 +120,7 @@ export default function Scheduling() {
               <input
                 value={patientId}
                 onChange={(e) => setPatientId(e.target.value)}
-                placeholder="eCW Patient ID"
+                placeholder={`${emrName} Patient ID`}
                 className="input pl-10"
               />
             </div>
@@ -132,6 +155,60 @@ export default function Scheduling() {
               )}
             </div>
           )}
+
+          {/* Referral authorization check */}
+          {referralCheck && !referralCheck.requires_referral && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-center gap-2">
+              <ShieldCheck size={16} className="text-green-600 flex-shrink-0" />
+              <p className="text-sm text-green-700">
+                PPO insurance — no referral authorization required.
+              </p>
+            </div>
+          )}
+
+          {referralCheck && referralCheck.requires_referral && !referralCheck.block && referralCheck.warnings.length === 0 && referralCheck.active_auth && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-start gap-2">
+              <ShieldCheck size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-green-700">Active referral on file</p>
+                <p className="text-xs text-green-600 mt-0.5">
+                  Ref #{referralCheck.active_auth.referral_number || '—'}
+                  {referralCheck.active_auth.visits_remaining != null && ` · ${referralCheck.active_auth.visits_remaining} visit(s) remaining`}
+                  {referralCheck.active_auth.end_date && ` · Expires ${referralCheck.active_auth.end_date}`}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {referralCheck && referralCheck.requires_referral && !referralCheck.block && referralCheck.warnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-700">Referral authorization warning</p>
+                <ul className="text-xs text-amber-600 mt-1 space-y-0.5">
+                  {referralCheck.warnings.map((w, i) => <li key={i}>• {w}</li>)}
+                </ul>
+                <Link to="/referral-auths" className="text-xs text-amber-700 underline mt-1 inline-block">
+                  Manage Referral Auths →
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {referralCheck && referralCheck.block && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+              <ShieldAlert size={16} className="text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-700">SCHEDULING BLOCKED</p>
+                <ul className="text-xs text-red-600 mt-1 space-y-0.5">
+                  {referralCheck.warnings.map((w, i) => <li key={i}>• {w}</li>)}
+                </ul>
+                <Link to="/referral-auths" className="text-xs text-red-700 underline mt-1 inline-block">
+                  Create Referral Authorization →
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -139,9 +216,9 @@ export default function Scheduling() {
       <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
         <h3 className="font-medium text-blue-800 text-sm mb-1">About Smart Scheduling</h3>
         <p className="text-sm text-blue-600 leading-relaxed">
-          Provider search pulls data from your eCW FHIR endpoint.
+          Provider search pulls data from your {emrName} FHIR endpoint.
           Actual appointment booking requires the healow Open Access API, which will be configured separately.
-          Insurance verification checks active Coverage resources in eCW.
+          Insurance verification checks active Coverage resources in {emrName}.
         </p>
       </div>
     </div>

@@ -18,7 +18,13 @@ ENV/
 .env
 *.pem
 *.key
+*.csv
 keys/
+
+# Database files (may contain PHI / password hashes)
+*.db
+*.sqlite
+*.sqlite3
 
 # Node / Frontend
 node_modules/
@@ -43,8 +49,23 @@ Thumbs.db
 # Tesseract / temp
 *.tmp
 
+# Business-sensitive documents (BAAs, proprietary rate sheets)
+assets/*.pdf
+assets/*.xlsx
+
 # Archive (kept locally, never push)
 _archive/
 
 # Fax testing
 IncomingFaxes/
+
+# Project
+plan.md
+TODO.md
+COMMANDS.md
+
+# Claude (local config, memory, project instructions)
+.claude/
+CLAUDE.md
+
+# Vendored assets (swagger-ui is committed — required for /docs in dev mode)

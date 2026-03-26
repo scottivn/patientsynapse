@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     ecw_authorize_url: str = Field(default="")
 
     # Athena-specific settings (used when emr_provider=athena)
+    # Set ATHENA_SANDBOX=true to point at preview.platform.athenahealth.com instead of production
+    athena_sandbox: bool = Field(default=False)
     athena_fhir_base_url: str = Field(default="https://api.platform.athenahealth.com/fhir/r4")
     athena_client_id: str = Field(default="")
     athena_client_secret: str = Field(default="")
@@ -26,8 +28,29 @@ class Settings(BaseSettings):
     athena_token_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/token")
     athena_practice_id: str = Field(default="")
 
+    @property
+    def athena_effective_fhir_base_url(self) -> str:
+        if self.athena_sandbox:
+            return "https://api.preview.platform.athenahealth.com/fhir/r4"
+        return self.athena_fhir_base_url
+
+    @property
+    def athena_effective_token_url(self) -> str:
+        if self.athena_sandbox:
+            return "https://api.preview.platform.athenahealth.com/oauth2/v1/token"
+        return self.athena_token_url
+
+    @property
+    def athena_effective_authorize_url(self) -> str:
+        if self.athena_sandbox:
+            return "https://api.preview.platform.athenahealth.com/oauth2/v1/authorize"
+        return self.athena_authorize_url
+
+    # Stub FHIR — use in-memory store instead of live EMR (no OAuth needed)
+    use_stub_fhir: bool = Field(default=False)
+
     # LLM
-    llm_provider: Literal["grok", "openai", "anthropic", "ollama"] = "grok"
+    llm_provider: Literal["grok", "openai", "anthropic", "ollama", "bedrock"] = "grok"
     xai_api_key: str = Field(default="")
     xai_model: str = "grok-4-1-fast-non-reasoning"
     openai_api_key: str = Field(default="")
@@ -36,6 +59,8 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-20250514"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    bedrock_region: str = "us-east-1"
 
     # App
     app_secret_key: str = Field(default="change-me-in-production")
@@ -44,14 +69,21 @@ class Settings(BaseSettings):
     app_env: Literal["development", "staging", "production"] = "development"
     log_level: str = "INFO"
 
+    # Admin auth
+    admin_default_username: str = "admin"
+    admin_default_password: str = Field(default="")
+    jwt_access_token_expire_minutes: int = 15
+    jwt_refresh_token_expire_days: int = 7
+    session_inactivity_timeout_minutes: int = 15
+
     # Fax processing
-    fax_poll_interval_seconds: int = 300
+    # fax_poll_interval_seconds: int = 300  # Enable when ready for prod auto-polling
     fax_upload_dir: str = "./uploads"
 
     # Database
     database_url: str = "sqlite:///./patientsynapse.db"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache()

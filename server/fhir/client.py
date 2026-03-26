@@ -45,8 +45,10 @@ class FHIRClient:
         client = await self._get_client()
         headers = await self._headers()
         resp = await client.get(f"/{resource_type}", params=params or {}, headers=headers)
+        if not resp.is_success:
+            logger.error(f"FHIR SEARCH {resource_type} failed -> {resp.status_code}")
         resp.raise_for_status()
-        logger.info(f"FHIR SEARCH {resource_type} params={params} -> {resp.status_code}")
+        logger.info(f"FHIR SEARCH {resource_type} -> {resp.status_code}")
         return resp.json()
 
     async def create(self, resource_type: str, resource: dict) -> dict:
@@ -54,6 +56,8 @@ class FHIRClient:
         client = await self._get_client()
         headers = await self._headers()
         resp = await client.post(f"/{resource_type}", json=resource, headers=headers)
+        if not resp.is_success:
+            logger.error(f"FHIR CREATE {resource_type} failed -> {resp.status_code}")
         resp.raise_for_status()
         logger.info(f"FHIR CREATE {resource_type} -> {resp.status_code}")
         return resp.json()

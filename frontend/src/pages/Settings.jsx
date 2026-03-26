@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Save, RefreshCw, CheckCircle2, XCircle, ExternalLink, Shield, Cpu, Server, Building2, Zap } from 'lucide-react'
-import { getAuthStatus, getStatus, loginAuth, switchEMR, connectService } from '../services/api'
+import ErrorBanner from '../components/ErrorBanner'
+import { getAuthStatus, getStatus, loginAuth, switchEMR, switchLLM, connectService } from '../services/api'
 
 const EMR_OPTIONS = [
   { value: 'ecw', label: 'eClinicalWorks', desc: 'SMART on FHIR, asymmetric JWT auth' },
@@ -19,7 +20,9 @@ export default function Settings() {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [switching, setSwitching] = useState(false)
+  const [switchingLLM, setSwitchingLLM] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     Promise.all([
@@ -32,17 +35,19 @@ export default function Settings() {
   }, [])
 
   const handleLogin = async () => {
+    setError(null)
     try {
       const data = await loginAuth()
       if (data.authorize_url) window.open(data.authorize_url, '_blank')
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
     }
   }
 
   const handleSwitchEMR = async (provider) => {
     if (status?.emr_provider_key === provider) return
     setSwitching(true)
+    setError(null)
     try {
       const result = await switchEMR(provider)
       // Refresh status + auth after switch
@@ -53,7 +58,7 @@ export default function Settings() {
       setAuth(a)
       setStatus(s)
     } catch (err) {
-      alert(`Switch failed: ${err.message}`)
+      setError(`Switch failed: ${err.message}`)
     } finally {
       setSwitching(false)
     }
@@ -61,6 +66,7 @@ export default function Settings() {
 
   const handleServiceConnect = async () => {
     setConnecting(true)
+    setError(null)
     try {
       await connectService()
       const [a, s] = await Promise.all([
@@ -70,9 +76,24 @@ export default function Settings() {
       setAuth(a)
       setStatus(s)
     } catch (err) {
-      alert(`Service connect failed: ${err.message}`)
+      setError(`Service connect failed: ${err.message}`)
     } finally {
       setConnecting(false)
+    }
+  }
+
+  const handleSwitchLLM = async (provider) => {
+    if (status?.llm_provider === provider) return
+    setSwitchingLLM(true)
+    setError(null)
+    try {
+      await switchLLM(provider)
+      const s = await getStatus().catch(() => null)
+      setStatus(s)
+    } catch (err) {
+      setError(`LLM switch failed: ${err.message}`)
+    } finally {
+      setSwitchingLLM(false)
     }
   }
 
@@ -85,6 +106,8 @@ export default function Settings() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       {/* EMR Provider */}
       <div className="card">
@@ -144,10 +167,12 @@ export default function Settings() {
             <ExternalLink size={14} />
             {connected ? 'Reconnect' : `Connect to ${emrName}`}
           </button>
-          <button onClick={handleServiceConnect} disabled={connecting} className="btn-primary text-sm flex items-center gap-2 bg-amber-600 hover:bg-amber-700">
-            <Zap size={14} />
-            {connecting ? 'Connecting...' : 'Service Connect (2-legged)'}
-          </button>
+          {status?.emr_provider_key === 'athena' && (
+            <button onClick={handleServiceConnect} disabled={connecting} className="btn-primary text-sm flex items-center gap-2 bg-amber-600 hover:bg-amber-700">
+              <Zap size={14} />
+              {connecting ? 'Connecting...' : 'Service Connect (2-legged)'}
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
@@ -175,23 +200,29 @@ export default function Settings() {
           <h2 className="font-semibold text-gray-900">LLM Provider</h2>
         </div>
         <p className="text-sm text-gray-500 mb-4">
-          The active LLM provider is controlled via the <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">LLM_PROVIDER</code> environment variable on the server.
-          Restart the server after changing it.
+          Click a card below to switch LLM providers — the server will use the new provider immediately.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {LLM_OPTIONS.map((opt) => {
             const active = status?.llm_provider === opt.value
             return (
-              <div
+              <button
                 key={opt.value}
-                className={`border rounded-lg px-4 py-3 ${active ? 'border-brand-400 bg-brand-50' : 'border-gray-200'}`}
+                onClick={() => handleSwitchLLM(opt.value)}
+                disabled={switchingLLM || active}
+                className={`border rounded-lg px-4 py-3 text-left transition-all ${
+                  active
+                    ? 'border-brand-400 bg-brand-50 ring-2 ring-brand-200'
+                    : 'border-gray-200 hover:border-brand-300 hover:bg-gray-50 cursor-pointer'
+                } ${switchingLLM ? 'opacity-60' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <p className={`font-medium text-sm ${active ? 'text-brand-700' : 'text-gray-700'}`}>{opt.label}</p>
                   {active && <span className="badge-success text-xs">Active</span>}
+                  {switchingLLM && !active && <RefreshCw size={14} className="animate-spin text-gray-400" />}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">{opt.desc}</p>
-              </div>
+              </button>
             )
           })}
         </div>

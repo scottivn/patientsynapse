@@ -33,34 +33,47 @@ async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
 
 async def extract_text_from_image(image_bytes: bytes) -> str:
-    """Extract text from an image using OCR."""
+    """Extract text from an image using OCR. Handles multi-page TIFFs."""
     try:
         import pytesseract
-        from PIL import Image
+        from PIL import Image, ImageSequence
         import io
 
         img = Image.open(io.BytesIO(image_bytes))
-        text = pytesseract.image_to_string(img)
-        logger.info(f"OCR extracted {len(text)} chars from image")
-        return text.strip()
+        text_parts = []
+        for i, frame in enumerate(ImageSequence.Iterator(img)):
+            # Convert to RGB/L for consistent Tesseract handling
+            frame_copy = frame.convert("L")
+            page_text = pytesseract.image_to_string(frame_copy)
+            if page_text.strip():
+                text_parts.append(page_text)
+            logger.info(f"OCR image page {i + 1}: {len(page_text)} chars")
+
+        text = "\n".join(text_parts).strip()
+        logger.info(f"OCR extracted {len(text)} chars from image ({i + 1} page(s))")
+        return text
     except ImportError:
         logger.error("pytesseract or Pillow not installed")
         return ""
 
 
 async def _ocr_pdf(pdf_bytes: bytes) -> str:
-    """OCR a PDF by converting pages to images first."""
+    """OCR a PDF by rendering pages to images with PyMuPDF, then running pytesseract."""
     try:
-        import pdf2image
+        import fitz  # PyMuPDF
         import pytesseract
+        from PIL import Image
 
-        images = pdf2image.convert_from_bytes(pdf_bytes)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         text_parts = []
-        for i, img in enumerate(images):
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(dpi=300)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             page_text = pytesseract.image_to_string(img)
             text_parts.append(page_text)
-            logger.info(f"OCR page {i+1}: {len(page_text)} chars")
+            logger.info(f"OCR page {i + 1}: {len(page_text)} chars")
+        doc.close()
         return "\n".join(text_parts).strip()
     except ImportError:
-        logger.error("pdf2image or pytesseract not installed for OCR")
+        logger.error("PyMuPDF (fitz) or pytesseract not installed for OCR")
         return ""
