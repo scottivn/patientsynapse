@@ -23,9 +23,9 @@ aiosqlite>=0.20.0
 
 # OCR / PDF
 pypdf>=4.0
+PyMuPDF>=1.24
 Pillow>=10.0
 pytesseract>=0.3.10
-# pdf2image>=1.17.0       # Uncomment for scanned PDF OCR (requires poppler)
 
 # MCP server
 mcp[cli]>=1.0

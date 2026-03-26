@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PatientSynapse — Demo Walkthrough</title>
+<style>
+  :root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #0891b2;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-500: #6b7280;
+    --gray-700: #374151;
+    --gray-900: #111827;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--gray-900);
+    background: var(--gray-50);
+    line-height: 1.6;
+  }
+  header {
+    background: white;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 1rem 2rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  header .inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--gray-900);
+  }
+  header h1 span { color: var(--primary); }
+  header .subtitle {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+    font-weight: 400;
+  }
+  nav {
+    background: white;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0.5rem 2rem;
+    position: sticky;
+    top: 58px;
+    z-index: 99;
+  }
+  nav .inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+  }
+  nav a {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--gray-700);
+    text-decoration: none;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+  nav a:hover { background: var(--gray-100); color: var(--primary); }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+  section {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    scroll-margin-top: 120px;
+  }
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  h2 .badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    vertical-align: middle;
+  }
+  .badge-admin { background: #dbeafe; color: #1e40af; }
+  .badge-public { background: #dcfce7; color: #166534; }
+  .badge-dme { background: #fef3c7; color: #92400e; }
+  h2 + .section-desc {
+    color: var(--gray-500);
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+  h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.75rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+  }
+  .steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 0.75rem 0 0.75rem 3rem;
+    border-left: 2px solid var(--gray-200);
+    margin-left: 1rem;
+  }
+  .steps > li:last-child { border-left-color: transparent; }
+  .steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: -14px;
+    top: 0.65rem;
+    width: 26px;
+    height: 26px;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .steps > li strong { color: var(--gray-900); }
+  code, pre {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85rem;
+  }
+  code {
+    background: var(--gray-100);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    color: var(--primary-dark);
+  }
+  pre {
+    background: var(--gray-900);
+    color: #e5e7eb;
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    line-height: 1.5;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+  .highlight { color: #fbbf24; }
+  .comment { color: #6b7280; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.85rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  th {
+    background: var(--gray-50);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--gray-500);
+  }
+  tr:last-child td { border-bottom: none; }
+  .callout {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  .callout-info { background: #eff6ff; border-left: 3px solid var(--primary); }
+  .callout-warn { background: #fffbeb; border-left: 3px solid var(--warning); }
+  .callout-success { background: #f0fdf4; border-left: 3px solid var(--success); }
+  .callout-danger { background: #fef2f2; border-left: 3px solid var(--danger); }
+  .callout-icon { font-size: 1rem; flex-shrink: 0; }
+  .status {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .s-pending { background: #fef3c7; color: #92400e; }
+  .s-verified { background: #dbeafe; color: #1e40af; }
+  .s-approved { background: #d1fae5; color: #065f46; }
+  .s-contacted { background: #e0e7ff; color: #3730a3; }
+  .s-confirmed { background: #cffafe; color: #155e75; }
+  .s-shipped { background: #ede9fe; color: #5b21b6; }
+  .s-fulfilled { background: #dcfce7; color: #166534; }
+  .s-hold { background: #fee2e2; color: #991b1b; }
+  .endpoint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    margin: 0.25rem 0;
+  }
+  .method {
+    display: inline-block;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 0.7rem;
+    font-family: monospace;
+  }
+  .m-get { background: #dbeafe; color: #1e40af; }
+  .m-post { background: #d1fae5; color: #065f46; }
+  .m-put { background: #fef3c7; color: #92400e; }
+  .m-delete { background: #fee2e2; color: #991b1b; }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; }
+    main { padding: 1rem; }
+    section { padding: 1.25rem; }
+    nav a { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+  }
+  .toc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+  }
+  .toc-card {
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 1rem;
+    text-decoration: none;
+    color: var(--gray-900);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .toc-card:hover {
+    border-color: var(--primary);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+  }
+  .toc-card .num {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .toc-card .title { font-weight: 600; margin-top: 0.25rem; }
+  .toc-card .desc { font-size: 0.8rem; color: var(--gray-500); margin-top: 0.25rem; }
+  .demo-patients {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .patient-card {
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+  .patient-card .name { font-weight: 600; }
+  .patient-card .meta { font-size: 0.8rem; color: var(--gray-500); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <div>
+      <h1><span>PatientSynapse</span> Demo Walkthrough</h1>
+      <div class="subtitle">Step-by-step guide to every demoable workflow</div>
+    </div>
+    <div style="font-size:0.75rem;color:var(--gray-500);">v0.1.0 &middot; Last updated March 2026</div>
+  </div>
+</header>
+
+<nav>
+  <div class="inner">
+    <a href="#setup">Setup</a>
+    <a href="#login">Login</a>
+    <a href="#dme">DME Orders</a>
+    <a href="#patient-portal">Patient Portal</a>
+    <a href="#fax">Fax Ingestion</a>
+    <a href="#rx-monitor">Rx Monitor</a>
+    <a href="#referral-auths">Referral Auths</a>
+    <a href="#scheduling">Scheduling</a>
+    <a href="#rcm">RCM</a>
+    <a href="#rates">Allowable Rates</a>
+    <a href="#settings">Settings</a>
+    <a href="#users">User Mgmt</a>
+    <a href="#api">API Explorer</a>
+    <a href="#data-ref">Data Reference</a>
+  </div>
+</nav>
+
+<main>
+
+<!-- ────────────────────── OVERVIEW ────────────────────── -->
+<section id="overview">
+  <h2>Overview</h2>
+  <p class="section-desc">PatientSynapse ships with comprehensive demo data so every workflow is explorable without EMR credentials. This guide walks through each feature with exact steps.</p>
+
+  <div class="toc-grid">
+    <a href="#setup" class="toc-card">
+      <div class="num">Step 0</div>
+      <div class="title">Environment Setup</div>
+      <div class="desc">Start server, configure env vars</div>
+    </a>
+    <a href="#login" class="toc-card">
+      <div class="num">Workflow 1</div>
+      <div class="title">Admin Login</div>
+      <div class="desc">JWT auth, role-based redirect</div>
+    </a>
+    <a href="#dme" class="toc-card">
+      <div class="num">Workflow 2</div>
+      <div class="title">DME Order Lifecycle</div>
+      <div class="desc">10 seeded orders across all states</div>
+    </a>
+    <a href="#patient-portal" class="toc-card">
+      <div class="num">Workflow 3</div>
+      <div class="title">Patient Confirmation Portal</div>
+      <div class="desc">Public portal with demo token</div>
+    </a>
+    <a href="#fax" class="toc-card">
+      <div class="num">Workflow 4</div>
+      <div class="title">Fax Ingestion Pipeline</div>
+      <div class="desc">OCR &rarr; LLM &rarr; FHIR matching</div>
+    </a>
+    <a href="#rx-monitor" class="toc-card">
+      <div class="num">Workflow 5</div>
+      <div class="title">Prescription Monitor</div>
+      <div class="desc">Auto-detect Rx &rarr; create DME orders</div>
+    </a>
+    <a href="#referral-auths" class="toc-card">
+      <div class="num">Workflow 6</div>
+      <div class="title">Referral Authorizations</div>
+      <div class="desc">Visit tracking, renewal, expiry alerts</div>
+    </a>
+    <a href="#scheduling" class="toc-card">
+      <div class="num">Workflow 7</div>
+      <div class="title">Scheduling & Insurance</div>
+      <div class="desc">Provider search, coverage verification</div>
+    </a>
+    <a href="#rcm" class="toc-card">
+      <div class="num">Workflow 8</div>
+      <div class="title">Revenue Cycle Management</div>
+      <div class="desc">KPI dashboard, billing data</div>
+    </a>
+    <a href="#rates" class="toc-card">
+      <div class="num">Workflow 9</div>
+      <div class="title">Allowable Rates</div>
+      <div class="desc">HCPCS rate lookup & bundle pricing</div>
+    </a>
+    <a href="#users" class="toc-card">
+      <div class="num">Workflow 10</div>
+      <div class="title">User Management</div>
+      <div class="desc">RBAC roles, create/deactivate users</div>
+    </a>
+  </div>
+</section>
+
+
+<!-- ────────────────────── SETUP ────────────────────── -->
+<section id="setup">
+  <h2>Environment Setup</h2>
+  <p class="section-desc">Get the demo environment running. Takes under 2 minutes.</p>
+
+  <h3>Prerequisites</h3>
+  <ul style="margin-left:1.5rem; font-size:0.9rem;">
+    <li>Python 3.12+</li>
+    <li>Node.js 18+ (for frontend dev server, optional)</li>
+    <li>No EMR credentials needed &mdash; stub mode provides all data</li>
+  </ul>
+
+  <h3>Start the Backend</h3>
+  <ol class="steps">
+    <li>
+      <strong>Create/update your <code>.env</code> file</strong> in the project root with these values:
+      <pre><code><span class="comment"># .env — Demo configuration</span>
+USE_STUB_FHIR=true
+APP_ENV=development
+ADMIN_DEFAULT_PASSWORD=demo123
+LLM_PROVIDER=grok
+XAI_API_KEY=your-key-here   <span class="comment"># Only needed for fax OCR demo</span></code></pre>
+      <div class="callout callout-info">
+        <span class="callout-icon">&#x1f4a1;</span>
+        <div><code>USE_STUB_FHIR=true</code> enables an in-memory FHIR store with 5 patients, insurance coverages, and prescription documents. No EMR connection is required.</div>
+      </div>
+    </li>
+    <li>
+      <strong>Install dependencies</strong>
+      <pre><code>pip install -r requirements.txt</code></pre>
+    </li>
+    <li>
+      <strong>Start the server</strong>
+      <pre><code>python -m server.main</code></pre>
+      <p style="font-size:0.85rem;color:var(--gray-500);margin-top:0.25rem;">Server starts on <strong>https://localhost:8443</strong> (or http://localhost:8443 in dev). Look for:</p>
+      <pre><code>PatientSynapse starting | env=development | emr=ecw | llm=grok
+USE_STUB_FHIR=true — using in-memory FHIR store
+Fax inbox: .../IncomingFaxes (150 files pending)
+Prescription monitor initialized</code></pre>
+    </li>
+  </ol>
+
+  <h3>Start the Frontend (Optional)</h3>
+  <ol class="steps">
+    <li>
+      <strong>Install and start the Vite dev server</strong>
+      <pre><code>cd frontend && npm install && npm run dev</code></pre>
+      <p style="font-size:0.85rem;color:var(--gray-500);margin-top:0.25rem;">Frontend runs on <strong>http://localhost:5173</strong> and proxies API calls to the backend.</p>
+    </li>
+  </ol>
+
+  <div class="callout callout-success">
+    <span class="callout-icon">&#x2705;</span>
+    <div><strong>Ready check:</strong> Visit <code>http://localhost:8443/api/status</code>. You should see <code>{"status": "running", "emr_provider": "ecw", "llm_provider": "grok", "app_env": "development"}</code></div>
+  </div>
+</section>
+
+
+<!-- ────────────────────── LOGIN ────────────────────── -->
+<section id="login">
+  <h2>Workflow 1: Admin Login <span class="badge badge-admin">Admin</span></h2>
+  <p class="section-desc">JWT-based authentication with HttpOnly cookies and 15-minute inactivity timeout.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to the login page</strong><br>
+      Open <code>http://localhost:5173</code> (frontend) or <code>http://localhost:8443</code> (backend with built frontend).<br>
+      You'll be redirected to <code>/login</code> automatically.
+    </li>
+    <li>
+      <strong>Enter demo credentials</strong>
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>Username</td><td><code>admin</code></td></tr>
+        <tr><td>Password</td><td><code>demo123</code> (or whatever you set as <code>ADMIN_DEFAULT_PASSWORD</code>)</td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>Login succeeds &rarr; redirected to Dashboard</strong><br>
+      Admin users land on <code>/</code> (Dashboard). DME users land on <code>/dme/admin</code>.
+    </li>
+  </ol>
+
+  <h3>What to point out</h3>
+  <ul style="margin-left:1.5rem;font-size:0.9rem;">
+    <li>JWT stored in HttpOnly cookie &mdash; not accessible to JavaScript (XSS-safe)</li>
+    <li>15-minute inactivity timeout (HIPAA requirement) &mdash; auto-logs out and redirects to login</li>
+    <li>Brute-force protection: 5 failed attempts locks the account for 15 minutes</li>
+    <li>HIPAA audit log records every login attempt (success and failure)</li>
+  </ul>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">&#x1f511;</span>
+    <div><strong>API-only login (for curl/Postman demos):</strong><br>
+    <code>POST /api/admin/login</code> with body <code>{"username": "admin", "password": "demo123"}</code><br>
+    The response sets an <code>access_token</code> cookie.</div>
+  </div>
+</section>
+
+
+<!-- ────────────────────── DME ORDERS ────────────────────── -->
+<section id="dme">
+  <h2>Workflow 2: DME Order Lifecycle <span class="badge badge-dme">DME + Admin</span></h2>
+  <p class="section-desc">10 demo orders are pre-seeded across every workflow state. Explore the full lifecycle from intake to fulfillment.</p>
+
+  <h3>DME Dashboard</h3>
+  <ol class="steps">
+    <li>
+      <strong>Navigate to DME Admin</strong> via sidebar &rarr; <code>/dme/admin</code><br>
+      The dashboard shows order counts by status and queue breakdowns.
+    </li>
+    <li>
+      <strong>Review the queue tabs.</strong> Each queue filters orders by workflow stage:
+
+      <table>
+        <tr><th>Queue</th><th>What it shows</th><th>Demo orders</th></tr>
+        <tr><td>Incoming</td><td>New orders needing review</td><td>Maria Garcia, Robert Johnson</td></tr>
+        <tr><td>Auto-Refill Due</td><td>Fulfilled orders past their replace date</td><td>Carmen Martinez, Albert Ortiz</td></tr>
+        <tr><td>In Progress</td><td>Verified/approved/ordering orders</td><td>Linda Chen, David Hernandez</td></tr>
+        <tr><td>Awaiting Patient</td><td>Confirmation sent, waiting for response</td><td>Sandra Perez</td></tr>
+        <tr><td>Patient Confirmed</td><td>Patient confirmed, ready to order</td><td>James Wilson</td></tr>
+        <tr><td>On Hold</td><td>Paused orders</td><td>Michael Thompson</td></tr>
+      </table>
+    </li>
+  </ol>
+
+  <h3>Seeded Demo Orders</h3>
+  <div class="demo-patients">
+    <div class="patient-card">
+      <div class="name">Maria Garcia</div>
+      <div class="meta"><span class="status s-pending">Pending</span> &middot; AirSense 11 Auto CPAP &middot; BCBS</div>
+      <div class="meta">AHI 32, initial setup &middot; Dr. Nguyen</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Robert Johnson</div>
+      <div class="meta"><span class="status s-pending">Pending</span> &middot; AirCurve 10 VAuto BiPAP &middot; Medicare</div>
+      <div class="meta">Encounter expired (410 days) &middot; Dr. Andry</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Carmen Martinez</div>
+      <div class="meta"><span class="status s-fulfilled">Fulfilled</span> &middot; Full face mask + filters &middot; Cigna</div>
+      <div class="meta">Auto-refill due (5 days overdue) &middot; Compliant 6.3 hrs/night</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Albert Ortiz</div>
+      <div class="meta"><span class="status s-fulfilled">Fulfilled</span> &middot; Heated tubing + chamber &middot; UHC</div>
+      <div class="meta">Auto-refill due (12 days overdue)</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Linda Chen</div>
+      <div class="meta"><span class="status s-verified">Verified</span> &middot; AirFit F30i full face mask &middot; Humana</div>
+      <div class="meta">Insurance verified, ready for approval &middot; Compliant 7.1 hrs/night</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">David Hernandez</div>
+      <div class="meta"><span class="status s-approved">Approved</span> &middot; AirFit P30i nasal pillow &middot; Molina</div>
+      <div class="meta">Ready to send patient confirmation &middot; Compliant 5.8 hrs/night</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Sandra Perez</div>
+      <div class="meta"><span class="status s-contacted">Patient Contacted</span> &middot; Full nasal resupply &middot; Humana</div>
+      <div class="meta">Demo token: <code>demo-token-sandra-perez</code></div>
+    </div>
+    <div class="patient-card">
+      <div class="name">James Wilson</div>
+      <div class="meta"><span class="status s-confirmed">Patient Confirmed</span> &middot; Cushion + filters &middot; Aetna</div>
+      <div class="meta">Ship to confirmed address &middot; Ready to order from vendor</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Patricia Ramirez</div>
+      <div class="meta"><span class="status s-shipped">Shipped</span> &middot; Headgear + heated tubing &middot; BCBS</div>
+      <div class="meta">UPS 1Z999AA10123456784 &middot; Vendor: ResMed Direct</div>
+    </div>
+    <div class="patient-card">
+      <div class="name">Michael Thompson</div>
+      <div class="meta"><span class="status s-hold">On Hold</span> &middot; Humidifier chamber &middot; Medicare</div>
+      <div class="meta">Phone disconnected — sent letter, awaiting response</div>
+    </div>
+  </div>
+
+  <h3>Demo: Walk an order through the full lifecycle</h3>
+  <ol class="steps">
+    <li>
+      <strong>Open Maria Garcia's pending order</strong><br>
+      Click her row in the Incoming queue. Review patient info, insurance, equipment, and clinical notes.
+    </li>
+    <li>
+      <strong>Verify insurance</strong><br>
+      Click <strong>"Verify Insurance"</strong>. In stub mode, this records a manual verification note.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/verify-insurance</code></div>
+    </li>
+    <li>
+      <strong>Approve the order</strong><br>
+      Click <strong>"Approve"</strong>. Status changes to <span class="status s-approved">Approved</span>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/approve</code></div>
+    </li>
+    <li>
+      <strong>Send patient confirmation</strong><br>
+      Click <strong>"Send Confirmation"</strong>. Choose SMS or Email. A unique token URL is generated.<br>
+      Status changes to <span class="status s-contacted">Patient Contacted</span>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/send-confirmation</code></div>
+      <div class="callout callout-info">
+        <span class="callout-icon">&#x1f4f1;</span>
+        <div>In production, this sends a real SMS/email. In demo mode, copy the token from the response to simulate patient confirmation.</div>
+      </div>
+    </li>
+    <li>
+      <strong>Patient confirms (see <a href="#patient-portal">Patient Portal</a> below)</strong><br>
+      Use the returned confirmation token to complete the patient-facing flow.
+    </li>
+    <li>
+      <strong>Mark as ordered from vendor</strong><br>
+      Click <strong>"Mark Ordered"</strong>. Enter vendor name and order ID.<br>
+      Status changes to <span class="status" style="background:#fef3c7;color:#92400e;">Ordering</span>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/mark-ordered</code></div>
+    </li>
+    <li>
+      <strong>Mark as shipped</strong><br>
+      Enter tracking number and carrier. Status changes to <span class="status s-shipped">Shipped</span>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/mark-shipped</code></div>
+    </li>
+    <li>
+      <strong>Mark as fulfilled</strong><br>
+      Click <strong>"Fulfill"</strong>. Order is complete. Status: <span class="status s-fulfilled">Fulfilled</span>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/fulfill</code></div>
+    </li>
+  </ol>
+
+  <h3>Other DME actions to demo</h3>
+  <table>
+    <tr><th>Action</th><th>Demo it on</th><th>What to show</th></tr>
+    <tr><td>Place on hold</td><td>Any active order</td><td>Enter a hold reason &rarr; order moves to hold queue</td></tr>
+    <tr><td>Resume from hold</td><td>Michael Thompson</td><td>Restores previous status automatically</td></tr>
+    <tr><td>Update compliance</td><td>Any order</td><td>Enter CPAP usage hours/days &rarr; compliant/non-compliant badge</td></tr>
+    <tr><td>Record encounter</td><td>Robert Johnson (expired)</td><td>Updates encounter date &rarr; encounter_current flips to true</td></tr>
+    <tr><td>Attach document</td><td>Any order</td><td>Add Rx scan, sleep study, etc. by filename</td></tr>
+    <tr><td>Reject order</td><td>Any pending order</td><td>Enter rejection reason &rarr; shows in order detail</td></tr>
+  </table>
+</section>
+
+
+<!-- ────────────────────── PATIENT PORTAL ────────────────────── -->
+<section id="patient-portal">
+  <h2>Workflow 3: Patient Confirmation Portal <span class="badge badge-public">Public</span></h2>
+  <p class="section-desc">Patients receive a unique link via SMS/email to confirm their DME order. No login required.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Open the demo confirmation page</strong><br>
+      Navigate to:
+      <pre><code>http://localhost:5173/dme/confirm/demo-token-sandra-perez</code></pre>
+      This is Sandra Perez's pre-seeded confirmation token.
+    </li>
+    <li>
+      <strong>Review order details</strong><br>
+      The page shows the patient's name, equipment being ordered, and a summary they can verify.
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/dme/confirm/demo-token-sandra-perez</code></div>
+    </li>
+    <li>
+      <strong>Choose fulfillment method</strong><br>
+      Select <strong>"Ship to me"</strong> or <strong>"Pick up in office"</strong>.
+    </li>
+    <li>
+      <strong>Confirm shipping address</strong> (if ship)<br>
+      Verify or update the address. Enter:
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>Address</td><td><code>9200 Wurzbach Rd</code></td></tr>
+        <tr><td>City</td><td><code>San Antonio</code></td></tr>
+        <tr><td>State</td><td><code>TX</code></td></tr>
+        <tr><td>ZIP</td><td><code>78240</code></td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>Submit confirmation</strong><br>
+      Order status changes to <span class="status s-confirmed">Patient Confirmed</span>. Staff sees it in the "Patient Confirmed" queue.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/confirm/demo-token-sandra-perez</code></div>
+    </li>
+  </ol>
+
+  <h3>What to point out</h3>
+  <ul style="margin-left:1.5rem;font-size:0.9rem;">
+    <li>No login needed &mdash; token-based access (similar to password reset links)</li>
+    <li>Tokens expire after 48 hours for security</li>
+    <li>Patient identity verified by DOB match before showing order details</li>
+    <li>Minimal PHI exposed &mdash; only first name and equipment description visible</li>
+    <li>One-time use &mdash; token is invalidated after confirmation</li>
+  </ul>
+</section>
+
+
+<!-- ────────────────────── FAX INGESTION ────────────────────── -->
+<section id="fax">
+  <h2>Workflow 4: Fax Ingestion Pipeline <span class="badge badge-admin">Admin</span></h2>
+  <p class="section-desc">OCR extracts text from incoming faxes, LLM parses clinical data, FHIR client matches to existing patients.</p>
+
+  <div class="callout callout-warn">
+    <span class="callout-icon">&#x26a0;&#xfe0f;</span>
+    <div><strong>Requires LLM API key.</strong> The fax pipeline uses your configured LLM provider (Grok/OpenAI/Anthropic) to extract structured data from OCR text. Set <code>XAI_API_KEY</code> (or the relevant key) in <code>.env</code>.</div>
+  </div>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to Fax Inbox</strong> via sidebar &rarr; <code>/fax-inbox</code><br>
+      Shows the IncomingFaxes directory with 150+ unprocessed test documents.
+    </li>
+    <li>
+      <strong>Check fax status</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/faxes/status</code></div>
+      <p style="font-size:0.85rem;">Returns count of pending files vs. already-processed files.</p>
+    </li>
+    <li>
+      <strong>Trigger manual processing</strong><br>
+      Click <strong>"Process Faxes"</strong> or call:
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/faxes/process</code></div>
+      <p style="font-size:0.85rem;">The pipeline runs: file pickup &rarr; OCR (PyPDF2/Tesseract) &rarr; LLM extraction &rarr; FHIR patient search &rarr; referral creation.</p>
+    </li>
+    <li>
+      <strong>Review results</strong><br>
+      Successfully processed faxes appear as new referrals in the Referrals tab.<br>
+      Each referral shows the LLM-extracted data alongside the original document for verification.
+    </li>
+  </ol>
+
+  <h3>What to point out</h3>
+  <ul style="margin-left:1.5rem;font-size:0.9rem;">
+    <li>Supports PDF, TIFF, and JPG fax formats</li>
+    <li>LLM extracts: patient name, DOB, diagnosis codes, referring physician, insurance, and clinical notes</li>
+    <li>FHIR patient matching uses name + DOB fuzzy search</li>
+    <li>Processed files are tracked in DB &mdash; won't re-process on next poll</li>
+    <li>The <code>IncomingFaxes/</code> directory contains 150+ realistic test documents</li>
+  </ul>
+</section>
+
+
+<!-- ────────────────────── PRESCRIPTION MONITOR ────────────────────── -->
+<section id="rx-monitor">
+  <h2>Workflow 5: Prescription Monitor <span class="badge badge-dme">DME + Admin</span></h2>
+  <p class="section-desc">Polls EMR for new prescription documents and auto-creates DME orders when CPAP/BiPAP Rx are detected.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Check prescription monitor status</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/prescriptions/status</code></div>
+      <p style="font-size:0.85rem;">Shows total detected, auto-created, pending review, and error counts.</p>
+    </li>
+    <li>
+      <strong>Trigger a manual poll</strong>
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/prescriptions/poll</code></div>
+      <p style="font-size:0.85rem;">The stub FHIR client returns 3 seeded prescription DocumentReferences:</p>
+      <table>
+        <tr><th>Patient</th><th>Rx Description</th><th>Prescriber</th></tr>
+        <tr><td>Maria Garcia (PT001)</td><td>CPAP Rx — AHI 18.4, 10 cmH2O</td><td>Dr. Alejandro Reyes</td></tr>
+        <tr><td>Rosa Rodriguez (PT003)</td><td>BiPAP Rx — AHI 34.2, failed CPAP trial</td><td>Dr. Alejandro Reyes</td></tr>
+        <tr><td>Carlos Hernandez (PT004)</td><td>CPAP Resupply Rx — compliant 6.8 hrs/night</td><td>Dr. Marta Espinoza</td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>View detected prescriptions</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/prescriptions</code></div>
+      <p style="font-size:0.85rem;">Lists all detected prescriptions with status (detected → order_created → error).</p>
+    </li>
+    <li>
+      <strong>Check auto-created DME orders</strong><br>
+      After polling, new DME orders appear in the Incoming queue with equipment auto-selected based on the Rx description.
+    </li>
+  </ol>
+
+  <div class="callout callout-success">
+    <span class="callout-icon">&#x2728;</span>
+    <div><strong>Key automation:</strong> The monitor detects "CPAP" or "BiPAP" in prescription text, looks up the patient in FHIR, and creates a pre-filled DME order — saving staff from manual entry.</div>
+  </div>
+</section>
+
+
+<!-- ────────────────────── REFERRAL AUTHS ────────────────────── -->
+<section id="referral-auths">
+  <h2>Workflow 6: Referral Authorizations <span class="badge badge-admin">Admin</span></h2>
+  <p class="section-desc">Track insurance referral authorizations, monitor visit usage, and auto-detect expiring auths.</p>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">&#x1f4cb;</span>
+    <div>No referral auths are pre-seeded. Create one during the demo to show the full flow.</div>
+  </div>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to Referral Auths</strong> via sidebar &rarr; <code>/referral-auths</code>
+    </li>
+    <li>
+      <strong>Create a new referral auth</strong><br>
+      Click <strong>"New Authorization"</strong> and fill in:
+      <table>
+        <tr><th>Field</th><th>Demo Value</th></tr>
+        <tr><td>Patient ID</td><td><code>pat-001</code></td></tr>
+        <tr><td>Patient Name</td><td><code>Jane Doe</code></td></tr>
+        <tr><td>Insurance</td><td><code>Aetna</code> / <code>HMO</code></td></tr>
+        <tr><td>Member ID</td><td><code>AET123456</code></td></tr>
+        <tr><td>Referral #</td><td><code>REF-2026-001</code></td></tr>
+        <tr><td>Referring PCP</td><td><code>Dr. Adams</code> / NPI: <code>1234567890</code></td></tr>
+        <tr><td>PCP Fax</td><td><code>555-111-3333</code></td></tr>
+        <tr><td>Start / End Date</td><td><code>2026-01-01</code> / <code>2026-12-31</code></td></tr>
+        <tr><td>Visits Allowed</td><td><code>12</code></td></tr>
+      </table>
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/referral-auths</code></div>
+    </li>
+    <li>
+      <strong>Record visits</strong><br>
+      Click <strong>"Record Visit"</strong> on the auth. Each click increments <code>visits_used</code> and decrements <code>visits_remaining</code>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/referral-auths/{id}/record-visit</code></div>
+    </li>
+    <li>
+      <strong>Watch status auto-compute:</strong>
+      <table>
+        <tr><th>Condition</th><th>Status</th></tr>
+        <tr><td>Within date range, visits remaining</td><td><span class="status s-approved">Active</span></td></tr>
+        <tr><td>End date within 14 days</td><td><span class="status s-contacted">Expiring Soon</span></td></tr>
+        <tr><td>End date in the past</td><td><span class="status s-hold">Expired</span></td></tr>
+        <tr><td>All visits used</td><td><span class="status" style="background:#e5e7eb;color:#374151;">Exhausted</span></td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>Request renewal</strong><br>
+      Click <strong>"Request Renewal"</strong> &rarr; status changes to <span class="status s-pending">Pending Renewal</span>.<br>
+      View the renewal fax content (auto-generated with patient + PCP details):
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/referral-auths/{id}/renewal-content</code></div>
+    </li>
+    <li>
+      <strong>Check the dashboard</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/referral-auths/dashboard</code></div>
+      <p style="font-size:0.85rem;">Shows total, active, expiring, expired, exhausted counts.</p>
+    </li>
+  </ol>
+
+  <h3>Scheduling integration</h3>
+  <p style="font-size:0.9rem;">When scheduling a patient with HMO insurance, the system checks for an active referral auth:</p>
+  <div class="endpoint"><span class="method m-get">GET</span> <code>/api/scheduling/referral-check/pat-001</code></div>
+  <p style="font-size:0.85rem;">If the patient's insurance is HMO and they have an active auth with remaining visits, <code>eligible: true</code>. Otherwise, <code>block: true</code> with a warning.</p>
+</section>
+
+
+<!-- ────────────────────── SCHEDULING ────────────────────── -->
+<section id="scheduling">
+  <h2>Workflow 7: Scheduling & Insurance Verification <span class="badge badge-admin">Admin</span></h2>
+  <p class="section-desc">Search providers by specialty and verify patient insurance coverage.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to Scheduling</strong> via sidebar &rarr; <code>/scheduling</code>
+    </li>
+    <li>
+      <strong>Search providers</strong><br>
+      The provider directory shows 5 stub providers:
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/scheduling/providers</code></div>
+      <table>
+        <tr><th>Provider</th><th>Specialty</th><th>Location</th></tr>
+        <tr><td>Dr. Sarah Chen</td><td>Pulmonology</td><td>Main Office - Suite 200</td></tr>
+        <tr><td>Dr. Michael Torres</td><td>Pulmonology</td><td>East Campus Clinic</td></tr>
+        <tr><td>Dr. Lisa Patel</td><td>Sleep Medicine</td><td>Sleep Center - Bldg B</td></tr>
+        <tr><td>Dr. James Wright</td><td>Internal Medicine</td><td>Main Office - Suite 100</td></tr>
+        <tr><td>Dr. Maria Gonzalez</td><td>Cardiology</td><td>Heart Center</td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>Filter by specialty</strong><br>
+      Try <code>?specialty=pulmonology</code> &mdash; returns only Chen and Torres.
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/scheduling/providers?specialty=pulmonology</code></div>
+    </li>
+    <li>
+      <strong>Verify insurance</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/scheduling/insurance/pat-001</code></div>
+      <p style="font-size:0.85rem;">Returns BCBS active coverage through 2026-12-31.</p>
+    </li>
+  </ol>
+</section>
+
+
+<!-- ────────────────────── RCM ────────────────────── -->
+<section id="rcm">
+  <h2>Workflow 8: Revenue Cycle Management <span class="badge badge-admin">Admin</span></h2>
+  <p class="section-desc">Full analytics dashboard with revenue KPIs, claims pipeline, A/R aging, denial management, and payer revenue breakdown.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to RCM</strong> via sidebar &rarr; <code>/rcm</code>
+    </li>
+    <li>
+      <strong>Review the revenue KPIs</strong> (top row stat cards)
+      <table>
+        <tr><th>Metric</th><th>Demo Value</th></tr>
+        <tr><td>Collected (MTD)</td><td><strong>$28,450</strong></td></tr>
+        <tr><td>Collected (YTD)</td><td><strong>$187,320</strong></td></tr>
+        <tr><td>Outstanding A/R</td><td><strong>$42,180</strong></td></tr>
+        <tr><td>Avg Reimbursement</td><td><strong>$312.50</strong></td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>Review the Claims Pipeline</strong><br>
+      Visual breakdown of 89 claims: 72 paid, 11 denied, 6 pending. Color-coded progress bar shows denial rate of 12.4%.
+    </li>
+    <li>
+      <strong>Review A/R Aging buckets</strong>
+      <table>
+        <tr><th>Bucket</th><th>Amount</th><th>Claims</th></tr>
+        <tr><td>0-30 days</td><td>$18,200</td><td>42</td></tr>
+        <tr><td>31-60 days</td><td>$12,450</td><td>28</td></tr>
+        <tr><td>61-90 days</td><td>$7,830</td><td>15</td></tr>
+        <tr><td>90+ days</td><td>$3,700</td><td>8</td></tr>
+      </table>
+    </li>
+    <li>
+      <strong>Review Top Denial Reasons</strong><br>
+      Ranked list: missing prior auth (36%), non-covered service (27%), patient not eligible (18%), duplicate claim (9%), timely filing (9%).
+    </li>
+    <li>
+      <strong>Review Revenue by Payer</strong><br>
+      Shows YTD revenue and claim count per payer. BCBS leads at $63,780 (31 claims).
+    </li>
+    <li>
+      <strong>Review Monthly Revenue Trend</strong><br>
+      Bar chart showing revenue from Oct 2025 through Mar 2026 with claim counts.
+    </li>
+    <li>
+      <strong>Look up patient billing context</strong><br>
+      Enter <code>pat-001</code> in the Patient Billing Lookup and click <strong>Look Up</strong>.<br>
+      Shows encounters, conditions, procedures, and insurance in a 4-column layout.
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/rcm/patient/pat-001</code></div>
+    </li>
+  </ol>
+
+  <h3>What to point out</h3>
+  <ul style="margin-left:1.5rem;font-size:0.9rem;">
+    <li>Denial rate above 10% is flagged in red &mdash; industry target is under 5%</li>
+    <li>A/R aging visualization helps identify collection risks before they become write-offs</li>
+    <li>Revenue by payer highlights which insurance contracts drive the most volume</li>
+    <li>Patient billing lookup provides claim-ready context: diagnosis codes, encounters, and active coverage</li>
+  </ul>
+</section>
+
+
+<!-- ────────────────────── ALLOWABLE RATES ────────────────────── -->
+<section id="rates">
+  <h2>Workflow 9: Allowable Rates <span class="badge badge-dme">DME + Admin</span></h2>
+  <p class="section-desc">Manage insurance reimbursement rates by payer and HCPCS code. Calculate bundle pricing for multi-item orders.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to Allowable Rates</strong> via sidebar &rarr; <code>/allowable-rates</code>
+    </li>
+    <li>
+      <strong>Import rates from the bundled spreadsheet</strong><br>
+      Upload <code>assets/InsuranceAllowablesForCPAP2026.xlsx</code> via the import feature.<br>
+      This contains real-world CPAP/BiPAP insurance reimbursement rates by payer.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/allowable-rates/import</code></div>
+    </li>
+    <li>
+      <strong>Browse rates by payer</strong><br>
+      After import, filter by payer name:
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/allowable-rates?payer=Medicare</code></div>
+    </li>
+    <li>
+      <strong>Look up a specific rate</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/allowable-rates/lookup?payer=Medicare&hcpcs_code=E0601&supply_months=6</code></div>
+      <p style="font-size:0.85rem;">Returns the allowed amount for a specific payer + HCPCS + supply period combination.</p>
+    </li>
+    <li>
+      <strong>Use the Bundle Pricing Calculator</strong><br>
+      Expand the <strong>"Bundle Pricing Calculator"</strong> collapsible section at the top of the page.
+      <ol style="margin-left:1.5rem;font-size:0.9rem;margin-top:0.5rem;">
+        <li>Select a payer (e.g., <code>Medicare</code>) and supply period (3 or 6 months)</li>
+        <li>Click a quick preset like <strong>"New CPAP Setup"</strong> or <strong>"Quarterly Resupply (Full Face)"</strong> to auto-select the right HCPCS codes</li>
+        <li>Or manually check individual items (mask, cushion, tubing, filters, etc.)</li>
+        <li>Click <strong>"Calculate"</strong> &mdash; see per-item rates + total allowed amount</li>
+      </ol>
+      <p style="font-size:0.85rem;margin-top:0.5rem;">Items without a rate in the database show "(no rate found)" and are excluded from the total. The "Some rates missing" badge warns when the bundle is incomplete.</p>
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/allowable-rates/bundle-pricing</code></div>
+    </li>
+    <li>
+      <strong>Create a custom rate</strong>
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/allowable-rates</code></div>
+      <pre><code>{
+  "payer": "Aetna",
+  "hcpcs_code": "E0601",
+  "description": "CPAP device",
+  "supply_months": 6,
+  "allowed_amount": 450.00,
+  "effective_year": 2026
+}</code></pre>
+    </li>
+  </ol>
+
+  <h3>Common HCPCS codes for CPAP demo</h3>
+  <table>
+    <tr><th>Code</th><th>Description</th></tr>
+    <tr><td><code>E0601</code></td><td>CPAP device</td></tr>
+    <tr><td><code>E0470</code></td><td>BiPAP device</td></tr>
+    <tr><td><code>A7030</code></td><td>Full face mask</td></tr>
+    <tr><td><code>A7031</code></td><td>Face mask cushion</td></tr>
+    <tr><td><code>A7033</code></td><td>Nasal pillow mask</td></tr>
+    <tr><td><code>A7035</code></td><td>Headgear</td></tr>
+    <tr><td><code>A7032</code></td><td>Nasal cushion replacement</td></tr>
+    <tr><td><code>A4604</code></td><td>Heated tubing</td></tr>
+    <tr><td><code>A7046</code></td><td>Humidifier water chamber</td></tr>
+    <tr><td><code>A7038</code></td><td>Disposable filters (pack)</td></tr>
+    <tr><td><code>A7039</code></td><td>Non-disposable filter</td></tr>
+  </table>
+</section>
+
+
+<!-- ────────────────────── SETTINGS ────────────────────── -->
+<section id="settings">
+  <h2>Workflow 10: Settings <span class="badge badge-admin">Admin Only</span></h2>
+  <p class="section-desc">View current EMR and LLM provider configuration.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to Settings</strong> via sidebar &rarr; <code>/settings</code>
+    </li>
+    <li>
+      <strong>View EMR configuration</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/settings/emr</code></div>
+      <p style="font-size:0.85rem;">Shows current EMR provider (eCW or athenahealth), FHIR base URL, and connected scopes.</p>
+    </li>
+    <li>
+      <strong>View LLM configuration</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/settings/llm</code></div>
+      <p style="font-size:0.85rem;">Shows current LLM provider (Grok, OpenAI, Anthropic, or Ollama).</p>
+    </li>
+  </ol>
+</section>
+
+
+<!-- ────────────────────── USER MANAGEMENT ────────────────────── -->
+<section id="users">
+  <h2>Workflow 11: User Management & RBAC <span class="badge badge-admin">Admin Only</span></h2>
+  <p class="section-desc">Create users with role-based access. DME users only see DME-related features.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Navigate to User Management</strong> via sidebar &rarr; <code>/admin/users</code>
+    </li>
+    <li>
+      <strong>Create a DME user</strong><br>
+      Click <strong>"Create User"</strong>:
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>Username</td><td><code>dme_staff</code></td></tr>
+        <tr><td>Password</td><td><code>DmeDemo123</code></td></tr>
+        <tr><td>Role</td><td><code>dme</code></td></tr>
+      </table>
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/admin/users</code></div>
+    </li>
+    <li>
+      <strong>Log out and log back in as the DME user</strong><br>
+      Notice the sidebar only shows: DME Admin, Allowable Rates<br>
+      All other tabs (Referrals, Scheduling, RCM, Settings, Users) are hidden.
+    </li>
+    <li>
+      <strong>Verify access control</strong><br>
+      As the DME user, try accessing <code>/api/referrals</code> &mdash; returns <code>403 Forbidden</code>.<br>
+      Access <code>/api/dme/orders</code> &mdash; returns <code>200 OK</code>.
+    </li>
+    <li>
+      <strong>Create a front-office user</strong> (as admin) with role <code>front_office</code>:
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>Username</td><td><code>fo_staff</code></td></tr>
+        <tr><td>Password</td><td><code>FoDemo12345</code></td></tr>
+        <tr><td>Role</td><td><code>front_office</code></td></tr>
+      </table>
+      <p style="font-size:0.85rem;">Front-office users see: Referral Auths, Scheduling — but not DME, RCM, or Settings.</p>
+    </li>
+    <li>
+      <strong>Deactivate a user</strong><br>
+      Toggle the active switch &rarr; deactivated user's next request returns <code>401</code>.
+    </li>
+  </ol>
+
+  <h3>Role access matrix</h3>
+  <table>
+    <tr><th>Feature</th><th>admin</th><th>dme</th><th>front_office</th></tr>
+    <tr><td>Dashboard</td><td>&#x2705;</td><td></td><td></td></tr>
+    <tr><td>Fax Inbox</td><td>&#x2705;</td><td></td><td></td></tr>
+    <tr><td>Referrals</td><td>&#x2705;</td><td></td><td></td></tr>
+    <tr><td>Referral Auths</td><td>&#x2705;</td><td></td><td>&#x2705;</td></tr>
+    <tr><td>Scheduling</td><td>&#x2705;</td><td></td><td>&#x2705;</td></tr>
+    <tr><td>RCM</td><td>&#x2705;</td><td></td><td></td></tr>
+    <tr><td>DME Admin</td><td>&#x2705;</td><td>&#x2705;</td><td></td></tr>
+    <tr><td>Allowable Rates</td><td>&#x2705;</td><td>&#x2705;</td><td></td></tr>
+    <tr><td>Settings</td><td>&#x2705;</td><td></td><td></td></tr>
+    <tr><td>User Management</td><td>&#x2705;</td><td></td><td></td></tr>
+  </table>
+</section>
+
+
+<!-- ────────────────────── API EXPLORER ────────────────────── -->
+<section id="api">
+  <h2>API Explorer (Swagger UI) <span class="badge badge-admin">Dev Only</span></h2>
+  <p class="section-desc">Full interactive API documentation available in development mode.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Open Swagger UI</strong><br>
+      Navigate to <code>http://localhost:8443/docs</code><br>
+      All endpoints are grouped by domain with request/response schemas.
+    </li>
+    <li>
+      <strong>Try endpoints directly</strong><br>
+      Login first via <code>POST /api/admin/login</code>, then use the browser's cookies for authenticated requests.
+    </li>
+  </ol>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">&#x1f6e1;&#xfe0f;</span>
+    <div>Swagger UI is <strong>disabled in production</strong> (<code>APP_ENV=production</code>) to avoid exposing the API surface. It's served with local assets (no CDN) so it works behind firewalls and ad blockers.</div>
+  </div>
+</section>
+
+
+<!-- ────────────────────── DATA REFERENCE ────────────────────── -->
+<section id="data-ref">
+  <h2>Demo Data Reference</h2>
+  <p class="section-desc">Complete inventory of all seeded data available in stub mode.</p>
+
+  <h3>FHIR Patients (StubFHIRClient)</h3>
+  <table>
+    <tr><th>ID</th><th>Name</th><th>DOB</th><th>Insurance</th><th>Type</th></tr>
+    <tr><td><code>PT001</code></td><td>Maria Garcia</td><td>1975-06-15</td><td>BCBS of Texas PPO</td><td>PPO</td></tr>
+    <tr><td><code>PT002</code></td><td>Jose Martinez</td><td>1948-05-02</td><td>UHC Complete Care</td><td>HMO</td></tr>
+    <tr><td><code>PT003</code></td><td>Rosa Rodriguez</td><td>1962-11-30</td><td>Aetna Better Health</td><td>HMO</td></tr>
+    <tr><td><code>PT004</code></td><td>Carlos Hernandez</td><td>1985-03-22</td><td>Humana Gold Plus</td><td>HMO</td></tr>
+    <tr><td><code>PT005</code></td><td>Patricia Wilson</td><td>1967-12-13</td><td>Curative First Health</td><td>PPO</td></tr>
+  </table>
+
+  <h3>Prescription Documents (Auto-Seeded)</h3>
+  <table>
+    <tr><th>Doc ID</th><th>Patient</th><th>Description</th><th>Prescriber</th></tr>
+    <tr><td><code>DOC001</code></td><td>Maria Garcia</td><td>CPAP Rx — AHI 18.4, 10 cmH2O</td><td>Dr. Alejandro Reyes</td></tr>
+    <tr><td><code>DOC002</code></td><td>Rosa Rodriguez</td><td>BiPAP Rx — AHI 34.2, failed CPAP trial</td><td>Dr. Alejandro Reyes</td></tr>
+    <tr><td><code>DOC003</code></td><td>Carlos Hernandez</td><td>CPAP Resupply Rx — compliant 6.8 hrs/night</td><td>Dr. Marta Espinoza</td></tr>
+  </table>
+
+  <h3>Environment Variables</h3>
+  <table>
+    <tr><th>Variable</th><th>Demo Value</th><th>Purpose</th></tr>
+    <tr><td><code>USE_STUB_FHIR</code></td><td><code>true</code></td><td>Use in-memory FHIR store (no EMR needed)</td></tr>
+    <tr><td><code>APP_ENV</code></td><td><code>development</code></td><td>Enables Swagger UI, debug endpoints</td></tr>
+    <tr><td><code>ADMIN_DEFAULT_PASSWORD</code></td><td><code>demo123</code></td><td>Password for the seeded admin user</td></tr>
+    <tr><td><code>LLM_PROVIDER</code></td><td><code>grok</code></td><td>LLM for fax OCR extraction</td></tr>
+    <tr><td><code>XAI_API_KEY</code></td><td><em>(your key)</em></td><td>Grok API key (only for fax pipeline)</td></tr>
+    <tr><td><code>APP_SECRET_KEY</code></td><td><code>change-me-in-production</code></td><td>JWT signing key (must change for prod)</td></tr>
+  </table>
+
+  <h3>API Quick Reference</h3>
+  <table>
+    <tr><th>Domain</th><th>Key Endpoints</th></tr>
+    <tr><td>Auth</td><td><code>POST /api/admin/login</code> &middot; <code>POST /api/admin/logout</code> &middot; <code>POST /api/admin/refresh</code></td></tr>
+    <tr><td>Users</td><td><code>GET /api/admin/users</code> &middot; <code>POST /api/admin/users</code> &middot; <code>PUT /api/admin/users/{id}</code></td></tr>
+    <tr><td>DME</td><td><code>GET|POST /api/dme/orders</code> &middot; <code>/approve</code> &middot; <code>/reject</code> &middot; <code>/hold</code> &middot; <code>/send-confirmation</code> &middot; <code>/mark-ordered</code> &middot; <code>/mark-shipped</code> &middot; <code>/fulfill</code></td></tr>
+    <tr><td>Patient Portal</td><td><code>GET|POST /api/dme/confirm/{token}</code> &middot; <code>POST /api/dme/patient-verify</code></td></tr>
+    <tr><td>Fax</td><td><code>GET /api/faxes/status</code> &middot; <code>POST /api/faxes/process</code></td></tr>
+    <tr><td>Prescriptions</td><td><code>POST /api/prescriptions/poll</code> &middot; <code>GET /api/prescriptions</code> &middot; <code>GET /api/prescriptions/status</code></td></tr>
+    <tr><td>Referral Auths</td><td><code>GET|POST /api/referral-auths</code> &middot; <code>/record-visit</code> &middot; <code>/request-renewal</code> &middot; <code>/renewal-content</code></td></tr>
+    <tr><td>Scheduling</td><td><code>GET /api/scheduling/providers</code> &middot; <code>GET /api/scheduling/insurance/{id}</code> &middot; <code>GET /api/scheduling/referral-check/{id}</code></td></tr>
+    <tr><td>RCM</td><td><code>GET /api/rcm/dashboard</code> &middot; <code>GET /api/rcm/patient/{id}</code></td></tr>
+    <tr><td>Rates</td><td><code>GET|POST /api/allowable-rates</code> &middot; <code>/lookup</code> &middot; <code>/bundle-pricing</code> &middot; <code>/import</code></td></tr>
+    <tr><td>Settings</td><td><code>GET /api/settings/emr</code> &middot; <code>GET /api/settings/llm</code></td></tr>
+    <tr><td>System</td><td><code>GET /api/status</code></td></tr>
+  </table>
+</section>
+
+</main>
+
+<footer style="text-align:center;padding:2rem;color:var(--gray-500);font-size:0.8rem;border-top:1px solid var(--gray-200);margin-top:2rem;">
+  PatientSynapse &middot; Intelligent Connections Between Every Point of Care &middot; Internal Demo Guide
+</footer>
+
+</body>
+</html>

@@ -143,6 +143,10 @@ export const switchLLM = (provider) =>
 export const pollFaxes = () => request('/faxes/poll', { method: 'POST' });
 export const getFaxStatus = () => request('/faxes/status');
 export const resetFaxInbox = () => request('/faxes/reset', { method: 'POST' });
+export const retryFailedFaxes = () => request('/faxes/retry-failed', { method: 'POST' });
+export const getFaxFileInfo = (filename) => request(`/faxes/file/${encodeURIComponent(filename)}/info`);
+export const getFaxFileUrl = (filename) => `${BASE}/faxes/file/${encodeURIComponent(filename)}`;
+export const getFaxPageUrl = (filename, page) => `${BASE}/faxes/file/${encodeURIComponent(filename)}/page/${page}`;
 
 // DME (Durable Medical Equipment)
 export const verifyDMEPatient = (patientId, dob) =>
@@ -215,6 +219,12 @@ export const getDMEEquipmentCategories = () => request('/dme/equipment-categorie
 export const validateDMEConfirmation = (token) => request(`/dme/confirm/${token}`);
 export const submitDMEConfirmation = (token, data) =>
   request(`/dme/confirm/${token}`, { method: 'POST', body: JSON.stringify(data) });
+export const rejectDMEConfirmation = (token, reason, callbackRequested) =>
+  request(`/dme/confirm/${token}/reject`, { method: 'POST', body: JSON.stringify({ reason, callback_requested: callbackRequested }) });
+export const getDMEExpiringEncounters = (days = 14) => request(`/dme/orders/expiring-encounters?days=${days}`);
+export const processDMEAutoDeliveries = () => request('/dme/process-auto-deliveries', { method: 'POST' });
+export const getDMEReceipt = (orderId) => request(`/dme/orders/${orderId}/receipt`);
+export const getDMEDeliveryTicket = (orderId) => request(`/dme/orders/${orderId}/delivery-ticket`);
 
 // Referral Authorizations (HMO/PCP referral tracking)
 export const createReferralAuth = (data) =>

@@ -42,6 +42,17 @@ async def lifespan(app: FastAPI):
         logger.critical("FATAL: app_secret_key is still the default. Set a strong secret in .env for production.")
         raise SystemExit(1)
 
+    # Block cloud LLM providers without BAA in production — PHI sent to these APIs
+    # violates HIPAA §164.504(e). Only ollama (local) and bedrock (AWS BAA) are safe.
+    HIPAA_SAFE_LLM_PROVIDERS = ("ollama", "bedrock")
+    if settings.app_env == "production" and settings.llm_provider not in HIPAA_SAFE_LLM_PROVIDERS:
+        logger.critical(
+            f"FATAL: LLM_PROVIDER={settings.llm_provider} is not HIPAA-safe for production. "
+            f"Use one of: {', '.join(HIPAA_SAFE_LLM_PROVIDERS)}. "
+            "Cloud providers (grok, openai, anthropic) require a signed BAA before handling PHI."
+        )
+        raise SystemExit(1)
+
     # Initialize databases
     await init_db()
     await seed_default_admin(settings.admin_default_username, settings.admin_default_password)

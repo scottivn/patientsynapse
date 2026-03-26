@@ -14,7 +14,9 @@ import {
   verifyDMEInsurance, approveDMEOrder, rejectDMEOrder, fulfillDMEOrder,
   updateDMECompliance, holdDMEOrder, resumeDMEOrder,
   sendDMEConfirmation, markDMEOrdered, markDMEShipped,
-  updateDMEEncounter, pollPrescriptions, listPrescriptions,
+  pollPrescriptions, listPrescriptions,
+  getDMEExpiringEncounters, processDMEAutoDeliveries,
+  getDMEReceipt, getDMEDeliveryTicket,
 } from '../services/api'
 
 const STATUS_STYLES = {
@@ -237,18 +239,28 @@ function HoldModal({ onConfirm, onCancel }) {
   )
 }
 
+const VENDOR_OPTIONS = ['In-House', 'PPM', 'VGM', 'Other']
+
 function VendorModal({ onConfirm, onCancel }) {
   const [vendor, setVendor] = useState('')
+  const [customVendor, setCustomVendor] = useState('')
   const [orderId, setOrderId] = useState('')
+  const effectiveVendor = vendor === 'Other' ? `Other: ${customVendor}` : vendor
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
       <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
         <h3 className="font-semibold text-gray-900">Order from Vendor</h3>
-        <input className="input w-full" placeholder="Vendor name" value={vendor} onChange={e => setVendor(e.target.value)} />
+        <select className="input w-full" value={vendor} onChange={e => setVendor(e.target.value)}>
+          <option value="">Select vendor...</option>
+          {VENDOR_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        {vendor === 'Other' && (
+          <input className="input w-full" placeholder="Vendor name" value={customVendor} onChange={e => setCustomVendor(e.target.value)} />
+        )}
         <input className="input w-full" placeholder="Vendor order ID (optional)" value={orderId} onChange={e => setOrderId(e.target.value)} />
         <div className="flex gap-2 justify-end">
           <button onClick={onCancel} className="btn-secondary text-sm">Cancel</button>
-          <button onClick={() => onConfirm(vendor, orderId)} className="btn-primary text-sm" disabled={!vendor}>Mark Ordered</button>
+          <button onClick={() => onConfirm(effectiveVendor, orderId)} className="btn-primary text-sm" disabled={!vendor || (vendor === 'Other' && !customVendor)}>Mark Ordered</button>
         </div>
       </div>
     </div>
@@ -544,16 +556,20 @@ function OrderRow({ order, onAction }) {
               </div>
             )}
 
+            {/* Patient-reported issue */}
+            {order.patient_rejected && (
+              <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                <span className="font-medium">Patient flagged issue: </span>{order.patient_rejection_reason || 'No details provided'}
+                {order.patient_callback_requested && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-orange-800 font-medium">
+                    — Callback requested
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Actions — contextual based on status */}
             <div className="flex flex-wrap gap-2 pt-1">
-              {/* Update Encounter — any active order */}
-              {!['rejected', 'fulfilled', 'cancelled'].includes(order.status) && (
-                <button disabled={busy} onClick={() => setModal('encounter')}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 flex items-center gap-1.5 disabled:opacity-50">
-                  <CalendarClock size={13} /> Update Encounter
-                </button>
-              )}
-
               {/* Compliance check — any active order */}
               {!['rejected', 'fulfilled', 'cancelled'].includes(order.status) && (
                 <button disabled={busy} onClick={() => setModal('compliance')}
@@ -613,9 +629,32 @@ function OrderRow({ order, onAction }) {
 
               {/* Mark fulfilled — shipped */}
               {order.status === 'shipped' && (
-                <button disabled={busy} onClick={() => act(() => onAction('fulfill', order.id))}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1.5 disabled:opacity-50">
-                  <Package size={13} /> Mark Delivered
+                <>
+                  <button disabled={busy} onClick={() => act(() => onAction('fulfill', order.id))}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <Package size={13} /> Mark Delivered
+                  </button>
+                  {order.auto_deliver_after && (
+                    <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                      <Clock size={10} /> Auto-delivers {new Date(order.auto_deliver_after).toLocaleDateString()}
+                    </span>
+                  )}
+                </>
+              )}
+
+              {/* Print receipt — fulfilled orders */}
+              {order.status === 'fulfilled' && (
+                <button disabled={busy} onClick={() => window.open(`/api/dme/orders/${order.id}/receipt`, '_blank')}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <FileText size={13} /> Print Receipt
+                </button>
+              )}
+
+              {/* Print delivery ticket — shipped or fulfilled */}
+              {['shipped', 'fulfilled'].includes(order.status) && (
+                <button disabled={busy} onClick={() => window.open(`/api/dme/orders/${order.id}/delivery-ticket`, '_blank')}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <Truck size={13} /> Delivery Ticket
                 </button>
               )}
 
@@ -675,6 +714,7 @@ export default function DMEAdmin() {
   const [rxResults, setRxResults] = useState(null)
   const [rxHistory, setRxHistory] = useState([])
   const [error, setError] = useState(null)
+  const [expiringEncounters, setExpiringEncounters] = useState([])
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -744,9 +784,11 @@ export default function DMEAdmin() {
     }
   }
 
-  // Load Rx history on mount
+  // Load Rx history, expiring encounters, and process auto-deliveries on mount
   useEffect(() => {
     listPrescriptions().then(setRxHistory).catch(() => {})
+    getDMEExpiringEncounters().then(setExpiringEncounters).catch(() => {})
+    processDMEAutoDeliveries().catch(() => {})
   }, [])
 
   const d = dashboard || {}
@@ -836,6 +878,31 @@ export default function DMEAdmin() {
                 {rx.error && <span className="text-xs text-red-500 truncate max-w-48" title={rx.error}>{rx.error}</span>}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Expiring encounters alert */}
+      {expiringEncounters.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <CalendarClock size={18} className="text-amber-600" />
+            <div>
+              <p className="text-sm font-medium text-amber-800">
+                {expiringEncounters.length} order{expiringEncounters.length > 1 ? 's' : ''} with encounters expiring within 14 days
+              </p>
+              <p className="text-xs text-amber-600 mt-0.5">Schedule follow-up appointments to avoid payer rejection</p>
+            </div>
+          </div>
+          <div className="flex gap-1 flex-wrap max-w-sm">
+            {expiringEncounters.slice(0, 5).map(o => (
+              <span key={o.id} className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium">
+                {o.patient_first_name} {o.patient_last_name} — {o.encounter_expires_in_days}d left
+              </span>
+            ))}
+            {expiringEncounters.length > 5 && (
+              <span className="text-[10px] text-amber-600">+{expiringEncounters.length - 5} more</span>
+            )}
           </div>
         </div>
       )}

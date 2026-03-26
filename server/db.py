@@ -66,6 +66,8 @@ async def init_all_tables():
                 equipment_category TEXT NOT NULL DEFAULT '',
                 equipment_description TEXT NOT NULL DEFAULT '',
                 quantity INTEGER NOT NULL DEFAULT 1,
+                bundle_items TEXT NOT NULL DEFAULT '[]',
+                selected_items TEXT NOT NULL DEFAULT '[]',
                 diagnosis_code TEXT NOT NULL DEFAULT '',
                 diagnosis_description TEXT NOT NULL DEFAULT '',
                 referring_physician TEXT NOT NULL DEFAULT '',
@@ -97,6 +99,9 @@ async def init_all_tables():
                 confirmation_responded_at TEXT,
                 patient_confirmed_address INTEGER NOT NULL DEFAULT 0,
                 patient_notes TEXT NOT NULL DEFAULT '',
+                patient_rejected INTEGER NOT NULL DEFAULT 0,
+                patient_rejection_reason TEXT NOT NULL DEFAULT '',
+                patient_callback_requested INTEGER NOT NULL DEFAULT 0,
                 fulfillment_method TEXT NOT NULL DEFAULT 'not_selected',
                 shipping_fee REAL,
                 shipping_tracking_number TEXT,
@@ -107,6 +112,7 @@ async def init_all_tables():
                 estimated_delivery_date TEXT,
                 pickup_ready_date TEXT,
                 fulfilled_at TEXT,
+                auto_deliver_after TEXT,
                 assigned_to TEXT,
                 staff_notes TEXT NOT NULL DEFAULT '',
                 hold_reason TEXT NOT NULL DEFAULT '',
@@ -192,6 +198,28 @@ async def init_all_tables():
                 processed_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
+
+        # ── Migrations ────────────────────────────────────────────
+        # Rename lab_result → labs_imaging (one-time, idempotent)
+        await db.execute(
+            "UPDATE referrals SET document_type = 'labs_imaging' WHERE document_type = 'lab_result'"
+        )
+
+        # Add new DME columns for existing databases
+        for col, default in [
+            ("bundle_items", "'[]'"),
+            ("selected_items", "'[]'"),
+            ("patient_rejected", "0"),
+            ("patient_rejection_reason", "''"),
+            ("patient_callback_requested", "0"),
+            ("auto_deliver_after", "NULL"),
+        ]:
+            try:
+                await db.execute(
+                    f"ALTER TABLE dme_orders ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}"
+                )
+            except Exception:
+                pass  # column already exists
 
         await db.commit()
     logger.info("Business entity tables initialized")

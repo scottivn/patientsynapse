@@ -16,7 +16,7 @@ PatientSynapse automates fax-to-EMR data entry with an AI-powered pipeline: OCR 
 | Auth | JWT in HttpOnly cookies (app auth) + SMART on FHIR OAuth2 (EMR auth) |
 | EMR | eClinicalWorks + athenahealth via FHIR R4 (plug-and-play) |
 | LLM | Grok (X.AI) default; OpenAI, Anthropic, Ollama, AWS Bedrock hot-swappable |
-| OCR | PyPDF2 + pytesseract |
+| OCR | PyMuPDF (fitz) + pytesseract (no poppler required) |
 | Deployment | AWS EC2 (t3.small), nginx, Let's Encrypt, systemd |
 
 ---
@@ -27,11 +27,18 @@ PatientSynapse automates fax-to-EMR data entry with an AI-powered pipeline: OCR 
 
 - Python 3.12+
 - Node.js 18+
-- API keys for your chosen LLM provider (or `USE_STUB_FHIR=true` + Ollama for fully local dev)
+- Tesseract OCR — required for fax/PDF text extraction
+  - macOS: `brew install tesseract`
+  - Ubuntu/Debian: `sudo apt install tesseract-ocr`
+  - Windows: download from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki)
+- An LLM provider — **Ollama** (local, free) is the easiest for development:
+  - Install: [ollama.com](https://ollama.com)
+  - Pull a model: `ollama pull llama3`
 
 ### Installation
 
 ```bash
+git clone <repo-url> patientsynapse
 cd patientsynapse
 python3 -m venv .venv
 source .venv/bin/activate
@@ -46,22 +53,54 @@ cd frontend && npm install && cd ..
 cp .env.example .env
 ```
 
-Key settings in `.env`:
-- `EMR_PROVIDER` — `ecw` or `athena`
-- `USE_STUB_FHIR=true` — use in-memory FHIR store (no EMR connection needed)
-- `LLM_PROVIDER` — `grok`, `openai`, `anthropic`, `ollama`, or `bedrock`
-- `ADMIN_DEFAULT_USERNAME` / `ADMIN_DEFAULT_PASSWORD` — seeded on first run
-- See `.env.example` for all options
+For a **fully local setup** with no external API keys or EMR credentials, set these in `.env`:
+
+```bash
+USE_STUB_FHIR=true
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
+APP_SECRET_KEY=any-random-string-for-local-dev
+ADMIN_DEFAULT_PASSWORD=admin
+```
+
+This gives you the complete pipeline (OCR, LLM extraction, FHIR patient matching, DME workflow) with zero external dependencies.
+
+All settings in `.env`:
+
+| Setting | Purpose | Default |
+| ------- | ------- | ------- |
+| `EMR_PROVIDER` | `ecw` or `athena` | `ecw` |
+| `USE_STUB_FHIR` | In-memory FHIR store (no EMR connection) | `false` |
+| `LLM_PROVIDER` | `grok`, `openai`, `anthropic`, `ollama`, or `bedrock` | `grok` |
+| `ADMIN_DEFAULT_USERNAME` | Seeded admin username | `admin` |
+| `ADMIN_DEFAULT_PASSWORD` | Seeded admin password — **change this** | (empty) |
+| `APP_SECRET_KEY` | JWT signing key — **must change for production** | `change-me-in-production` |
+
+See `.env.example` for the full list.
+
+### Generate Test Data
+
+Populate the fax inbox with synthetic test faxes (100 files — PDFs, TIFFs, PNGs):
+
+```bash
+source .venv/bin/activate
+python scripts/generate_dummy_faxes.py
+```
+
+This creates `IncomingFaxes/` with realistic but entirely fictional patient data. DME demo orders are auto-seeded on first startup.
 
 ### Running
 
 **Backend** (terminal 1):
+
 ```bash
 source .venv/bin/activate
 uvicorn server.main:app --reload --port 8000
 ```
 
 **Frontend** (terminal 2):
+
 ```bash
 cd frontend && npm run dev
 ```
@@ -69,7 +108,7 @@ cd frontend && npm run dev
 - API: http://localhost:8000 | Docs: http://localhost:8000/docs
 - UI: http://localhost:5173
 
-Default admin login: username and password from `ADMIN_DEFAULT_USERNAME` / `ADMIN_DEFAULT_PASSWORD` in `.env`.
+Default admin login: `admin` / whatever you set in `ADMIN_DEFAULT_PASSWORD` in `.env`.
 
 ---
 
@@ -117,25 +156,26 @@ server/
 frontend/
   src/
     App.jsx                   Routes + AuthProvider wrapper
-    services/api.js           Centralized API client (all backend calls)
+    services/api.js           Centralized API client (all backend calls, including DME rejection, auto-deliveries, expiring encounters, receipts, delivery tickets)
     contexts/AuthContext.jsx   Session state (user, login, logout)
     components/
       Layout.jsx              Sidebar navigation + outlet
       ProtectedRoute.jsx      Auth guard (redirect to /login)
       ErrorBanner.jsx         Dismissible error display
+      FaxDocumentViewer.jsx   In-browser fax document viewer (PDF, TIFF, PNG, JPG; page nav + zoom)
     pages/
       Login.jsx               Admin login form
       Dashboard.jsx           KPI cards + system status
-      FaxInbox.jsx            Fax upload, polling, classification
+      FaxInbox.jsx            Fax upload, polling, classification (8 doc categories with filter pills); error count badge + retry-failed button
       Referrals.jsx           Referral document list + filter
-      ReferralDetail.jsx      Single referral review + approve/reject
+      ReferralDetail.jsx      Single referral review + approve/reject; side-by-side original doc (FaxDocumentViewer) + extracted data
       ReferralAuths.jsx       HMO authorization tracking
       Scheduling.jsx          Provider search + insurance verification
       RCM.jsx                 Revenue cycle dashboard
       Settings.jsx            EMR/LLM provider switcher + OAuth
       DMEOrder.jsx            Patient-facing DME info page (public)
-      DMEConfirm.jsx          Patient confirmation via token (public)
-      DMEAdmin.jsx            Staff DME pipeline dashboard (protected)
+      DMEConfirm.jsx          Patient confirmation via token (public); bundle item selection, ship/pickup with fee display, rejection form with callback option
+      DMEAdmin.jsx            Staff DME pipeline dashboard (protected); vendor dropdown (In-House/PPM/VGM/Other), auto-deliver timer, expiring encounters alert, receipt + delivery ticket generation, patient rejection details inline
       AllowableRates.jsx      Insurance rate management
       UserManagement.jsx      Admin user CRUD (roles, activate/deactivate)
 tests/
@@ -143,6 +183,9 @@ tests/
   auth/
     test_rbac.py              Role-based route guard tests
     test_user_management.py   User CRUD endpoint tests
+  services/
+    test_fax_pipeline.py      OCR (PyMuPDF), fax status error counts, retry-failed, path traversal, file serving, page rendering
+    test_todo_features.py     Fax category expansion, DME patient rejection, auto-deliveries, expiring encounters, receipts, delivery tickets, bundle item selection
 ```
 
 ---
@@ -195,8 +238,9 @@ OAuth2 connection to eCW or Athena:
 
 No login — patients access their order via a cryptographically random, time-limited URL token:
 
-- `GET /api/dme/confirm/{token}` — validate token, return patient-safe order data
-- `POST /api/dme/confirm/{token}` — submit confirmation (address, fulfillment choice)
+- `GET /api/dme/confirm/{token}` — validate token, return patient-safe order data (includes `bundle_items` and `selected_items` for bundle orders)
+- `POST /api/dme/confirm/{token}` — submit confirmation (address, fulfillment choice, selected items for bundles)
+- `POST /api/dme/confirm/{token}/reject` — patient flags an issue; order goes ON_HOLD with rejection reason and optional callback request
 
 Tokens expire after 48 hours.
 
@@ -257,7 +301,7 @@ Unique constraint on `(payer, payer_plan, hcpcs_code, supply_months, effective_y
 | id | TEXT PK | UUID |
 | filename | TEXT | Source fax filename |
 | status | TEXT | pending, approved, rejected, pushed, error |
-| document_type | TEXT | referral, prior_auth, lab_result, clinical_note, unknown |
+| document_type | TEXT | referral, labs_imaging, insurance_auth, medication_prior_auth, dme, sleep_study_results, medical_records, other |
 | raw_text | TEXT | OCR-extracted text |
 | extracted_data | TEXT (JSON) | LLM-structured output |
 | patient_id | TEXT | Matched FHIR Patient ID |
@@ -282,6 +326,12 @@ Indexed on `status`.
 | auto_replace | INTEGER | Boolean — triggers resupply cycle |
 | confirmation_token | TEXT UNIQUE | Cryptographic token for patient portal |
 | documents | TEXT (JSON) | Attached documents array |
+| bundle_items | TEXT (JSON) | Array of items in a supply bundle (category, HCPCS, description) |
+| selected_items | TEXT (JSON) | Patient-selected subset of bundle_items (deselected items excluded from fulfillment) |
+| patient_rejected | INTEGER | Boolean (0/1) — patient flagged an issue via confirmation page |
+| patient_rejection_reason | TEXT | Free-text reason from patient rejection form |
+| patient_callback_requested | INTEGER | Boolean (0/1) — patient checked "Please call me" |
+| auto_deliver_after | TEXT | ISO datetime — shipped orders auto-fulfill after this timestamp (7 days for ship, immediate for pickup) |
 | pricing_details | TEXT (JSON) | Bundle pricing from allowable rates |
 | ... | ... | 60+ columns covering full DME lifecycle |
 
@@ -374,8 +424,12 @@ All endpoints prefixed with `/api`. Auth column: **Admin** = `require_admin`, **
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/faxes/poll` | Admin, Front Office | Scan IncomingFaxes/ dir, OCR + process |
-| GET | `/faxes/status` | Admin, Front Office | Current fax inbox state |
+| GET | `/faxes/status` | Admin, Front Office | Current fax inbox state (includes `errors` count of failed entries) |
 | POST | `/faxes/reset` | Admin, Front Office | Reset processed tracking for re-ingestion |
+| POST | `/faxes/retry-failed` | Admin, Front Office | Clear failed fax entries and reprocess them. Returns `{ retried, referrals[], status }` |
+| GET | `/faxes/file/{filename}` | Admin, Front Office | Serve original fax file for viewing. Path traversal protected. `Cache-Control: no-store`. |
+| GET | `/faxes/file/{filename}/info` | Admin, Front Office | File metadata: `{ pages, content_type, size_bytes }` |
+| GET | `/faxes/file/{filename}/page/{page_num}` | Admin, Front Office | Render specific page as PNG (TIFF/PDF browser viewing). 0-indexed. |
 
 ### Prescription Monitor
 
@@ -406,6 +460,10 @@ All endpoints prefixed with `/api`. Auth column: **Admin** = `require_admin`, **
 | POST | `/dme/orders/{order_id}/encounter` | Admin, DME | Update encounter tracking |
 | POST | `/dme/orders/{order_id}/documents` | Admin, DME | Attach document for insurance approval |
 | DELETE | `/dme/orders/{order_id}/documents/{doc_id}` | Admin, DME | Remove document |
+| GET | `/dme/orders/{order_id}/receipt` | Admin, DME | Generate receipt for fulfilled/shipped order |
+| GET | `/dme/orders/{order_id}/delivery-ticket` | Admin, DME | Generate delivery ticket for shipped order |
+| GET | `/dme/orders/expiring-encounters` | Admin, DME | Orders with encounters expiring within `?days=` (default 14) |
+| POST | `/dme/process-auto-deliveries` | Admin, DME | Auto-fulfill shipped orders past `auto_deliver_after` timestamp |
 
 ### DME Orders — Queues
 
@@ -428,8 +486,9 @@ All endpoints prefixed with `/api`. Auth column: **Admin** = `require_admin`, **
 | POST | `/dme/orders` | Public | Create DME order (Pydantic-validated input) |
 | POST | `/dme/patient-verify` | Public | Verify patient identity (ID + DOB) |
 | GET | `/dme/equipment-categories` | Public | List equipment categories, bundles, HCPCS map |
-| GET | `/dme/confirm/{token}` | Public | Validate confirmation token, return safe order data |
-| POST | `/dme/confirm/{token}` | Public | Submit patient confirmation |
+| GET | `/dme/confirm/{token}` | Public | Validate confirmation token, return safe order data (includes bundle_items/selected_items) |
+| POST | `/dme/confirm/{token}` | Public | Submit patient confirmation (address, fulfillment, selected items) |
+| POST | `/dme/confirm/{token}/reject` | Public | Patient flags issue — order → ON_HOLD with reason + optional callback request |
 
 ### Referral Authorizations
 
@@ -501,6 +560,29 @@ Processes referral faxes through the full pipeline.
 | `list_referrals(status)` | List all referrals, optionally filtered |
 | `get_referral(ref_id)` | Get single referral |
 
+### FaxIngestionService (`server/services/fax_ingestion.py`)
+
+Polls the IncomingFaxes directory, dispatches OCR, and feeds results into the referral pipeline. Tracks processed files in the `fax_processed` table to prevent re-ingestion.
+
+| Method | Description |
+|---|---|
+| `poll_and_process()` | Scan IncomingFaxes/ for new files, OCR each, classify + extract via LLM, write to `referrals` and `fax_processed` |
+| `get_status()` | Return inbox state: total, processed, pending counts, plus `errors` count (entries in `fax_processed` where `result_id` begins with `error:`) |
+| `retry_failed()` | Delete `fax_processed` entries marked as failed, then re-run `poll_and_process()` on them. Returns `{ retried, referrals[], status }` |
+| `reset()` | Clear all `fax_processed` entries to allow full re-ingestion |
+
+### OCRService (`server/services/ocr.py`)
+
+Extracts plain text from uploaded fax files for downstream LLM processing.
+
+| Method | Description |
+|---|---|
+| `extract_text(file_path)` | Route to PDF or image extractor based on file extension |
+| `_ocr_pdf(file_path)` | Render each PDF page to a PNG image via PyMuPDF (`fitz`) and run pytesseract. No poppler dependency. |
+| `_ocr_image(file_path)` | Run pytesseract directly on PNG/JPG/TIFF images |
+| `get_page_count(file_path)` | Return number of pages for PDF or TIFF files |
+| `render_page_to_png(file_path, page_num)` | Render a single page (0-indexed) to PNG bytes via PyMuPDF, for browser preview |
+
 ### DMEService (`server/services/dme.py`)
 
 Manages DME orders from creation through fulfillment. Sleep-medicine focused (CPAP, BiPAP, masks, supplies).
@@ -532,6 +614,11 @@ Manages DME orders from creation through fulfillment. Sleep-medicine focused (CP
 | `get_on_hold()` | Held orders |
 | `get_dashboard()` | Counts by status |
 | `update_compliance(order_id, data)` | Update compliance from AirPM |
+| `patient_reject(token, reason, callback_requested)` | Patient flags issue — sets `patient_rejected`, reason, callback flag; moves order to ON_HOLD |
+| `get_expiring_encounters(days)` | Orders with encounter expiry within N days (default 14) |
+| `process_auto_deliveries()` | Auto-fulfill shipped orders past `auto_deliver_after` timestamp (7 days for ship, immediate for pickup) |
+| `generate_receipt(order_id)` | Generate receipt data for fulfilled/shipped order |
+| `generate_delivery_ticket(order_id)` | Generate delivery ticket data for shipped order |
 
 ### PrescriptionMonitorService (`server/services/prescription_monitor.py`)
 
@@ -614,7 +701,7 @@ All implement the `LLMProvider` base class with three standard prompts:
 
 - **`extract_referral_data(text)`** — structured JSON extraction from referral fax OCR text
 - **`extract_prescription_data(text)`** — structured JSON extraction from DME prescription documents (patient, prescriber, diagnosis, equipment with HCPCS codes, clinical notes)
-- **`classify_document(text)`** — categorize fax as referral, lab_result, insurance_auth, medical_records, or other
+- **`classify_document(text)`** — categorize fax as referral, labs_imaging, insurance_auth, medication_prior_auth, dme, sleep_study_results, medical_records, or other. (Migration auto-renames legacy `lab_result` → `labs_imaging` on startup.)
 
 Bedrock uses the Anthropic messages format via `invoke_model` API and requires a BAA for HIPAA compliance.
 
@@ -636,7 +723,7 @@ Bedrock uses the Anthropic messages format via `invoke_model` API and requires a
 | `/rcm` | RCM | admin | Revenue cycle dashboard |
 | `/settings` | Settings | admin | EMR/LLM provider switcher, OAuth connect |
 | `/admin/users` | UserManagement | admin | Create/edit/delete users, assign roles |
-| `/dme/admin` | DMEAdmin | admin, dme | Pipeline-based DME workflow (6 queue lanes) |
+| `/dme/admin` | DMEAdmin | admin, dme | Pipeline-based DME workflow (6 queue lanes); vendor dropdown, auto-deliver timer, expiring encounters banner, receipt/delivery ticket generation, patient rejection details |
 | `/allowable-rates` | AllowableRates | admin, dme | Insurance rate management |
 
 Users who navigate to a route they don't have access to are redirected to their role's landing page (admin → `/`, front_office → `/faxes`, dme → `/dme/admin`).
@@ -647,7 +734,19 @@ Users who navigate to a route they don't have access to are redirected to their 
 |---|---|---|
 | `/login` | Login | Admin login form |
 | `/dme` | DMEOrder | Patient-facing DME info page |
-| `/dme/confirm/:token` | DMEConfirm | Patient confirmation (address, pickup/ship) |
+| `/dme/confirm/:token` | DMEConfirm | Patient confirmation (address, pickup/ship with $15 fee, bundle item selection, rejection form with callback option) |
+
+### Frontend API Client (`frontend/src/services/api.js`)
+
+New DME functions added:
+
+| Function | Backend Endpoint | Description |
+|---|---|---|
+| `rejectDMEConfirmation(token, reason, callbackRequested)` | `POST /api/dme/confirm/{token}/reject` | Patient flags issue with reason text + optional "Please call me" flag |
+| `getDMEExpiringEncounters(days)` | `GET /api/dme/orders/expiring-encounters?days=` | Orders with encounters expiring within N days |
+| `processDMEAutoDeliveries()` | `POST /api/dme/process-auto-deliveries` | Auto-fulfill shipped orders past auto_deliver_after timestamp |
+| `getDMEReceipt(orderId)` | `GET /api/dme/orders/{order_id}/receipt` | Generate receipt for fulfilled/shipped order |
+| `getDMEDeliveryTicket(orderId)` | `GET /api/dme/orders/{order_id}/delivery-ticket` | Generate delivery ticket for shipped order |
 
 ---
 
@@ -666,12 +765,42 @@ Orders originate internally (prescription, auto-refill, staff-initiated, patient
 | `approved` | Ready to send confirmation to patient |
 | `patient_contacted` | Confirmation link sent, awaiting response |
 | `patient_confirmed` | Patient confirmed, ready for vendor order |
-| `ordering` | Order placed with vendor |
+| `ordering` | Order placed with vendor (patient-facing label: "Being fulfilled") |
 | `shipped` | Shipped or ready for pickup |
 | `fulfilled` | Patient received equipment |
 | `rejected` | Denied |
-| `on_hold` | Paused |
+| `on_hold` | Paused (includes patient-rejected orders with rejection details) |
 | `cancelled` | Patient declined or order cancelled |
+
+### Auto-Delivery Timer
+
+Shipped orders set `auto_deliver_after` based on fulfillment method:
+
+- **Ship:** 7 days after ship date (delivery assumed)
+- **Pickup:** Immediate (patient has the equipment)
+
+`POST /api/dme/process-auto-deliveries` checks all shipped orders and auto-fulfills those past their `auto_deliver_after` timestamp. Intended to be called periodically (cron or manual).
+
+### Vendor Selection
+
+When marking an order as ordered, staff select a vendor from a dropdown: **In-House**, **PPM**, **VGM**, or **Other**. This replaces the previous free-text vendor name input.
+
+### Expiring Encounters Alert
+
+`GET /api/dme/orders/expiring-encounters?days=14` returns orders with encounter dates expiring within the specified window. DMEAdmin displays a banner above the pipeline when expiring encounters exist.
+
+### Patient Rejection Flow
+
+From the confirmation page (`/dme/confirm/:token`), patients can click "Something's not right?" to open a rejection form with:
+
+- Free-text reason field
+- "Please call me" checkbox
+
+Submitting calls `POST /api/dme/confirm/{token}/reject`, which sets `patient_rejected=1`, stores the reason and callback flag, and moves the order to `on_hold`. Staff see rejection details inline in DMEAdmin.
+
+### Bundle Item Selection
+
+Bundle orders (e.g., Full Resupply) include multiple supply items stored in `bundle_items`. On the confirmation page, patients see individual checkboxes for each item and can deselect items they don't need. The selected subset is stored in `selected_items` and used for fulfillment.
 
 ### Equipment Categories (Sleep Medicine)
 
@@ -766,6 +895,7 @@ Tests use an isolated SQLite database (temp file), `USE_STUB_FHIR=true`, and `ht
 | DME Order Lifecycle | `tests/services/test_dme.py` | Create order, list/get/filter orders, approve, reject (with reason), hold/resume, full fulfillment flow (approve→ordered→shipped→fulfilled), confirmation token generation + public validation + patient submission, insurance verification, encounter tracking, compliance updates, document add/remove, dashboard stats, queue endpoints (8 filter views), status filter, encounter types + equipment categories endpoints |
 | Referral Authorizations | `tests/services/test_referral_auth.py` | Create auth, list/get/filter auths, update fields, record visit (count tracking), visits-exhausted status, expired/expiring-soon status computation, request renewal + renewal content, cancel auth, dashboard stats, expiring-soon endpoint, scheduling eligibility (with/without active auth) |
 | System & Rates | `tests/services/test_system_and_rates.py` | System status, EMR/LLM config endpoints, settings require admin, logout, provider search (with specialty filter), insurance verification stub, RCM dashboard + patient billing, allowable rates CRUD (create, lookup, delete, bundle pricing, list payers, 404 on missing), prescription/fax status endpoints, DME patient verify stub |
+| New Features | `tests/services/test_todo_features.py` | 20 tests: expanded fax document categories (8 types, lab_result→labs_imaging migration), DME patient rejection (POST confirm/{token}/reject, ON_HOLD transition, reason + callback flag), auto-delivery processing (7-day ship timer, immediate pickup), expiring encounters query (≤14 days), receipt + delivery ticket generation, bundle item selection (patient deselects items on confirmation page) |
 
 ---
 
@@ -776,3 +906,86 @@ Tests use an isolated SQLite database (temp file), `USE_STUB_FHIR=true`, and `ht
 - **Deploy script:** `bash scripts/deploy.sh`
 - **Start instance:** `aws ec2 start-instances --instance-ids <instance-id> --region us-east-1`
 - **IAM role:** EC2 instance role with `AmazonBedrockFullAccess` for HIPAA-eligible LLM access
+
+---
+
+## Security & HIPAA Compliance
+
+### HIPAA Technical Safeguards
+
+| Safeguard | Implementation | Status |
+| --------- | ------------- | ------ |
+| **Access Control** | JWT auth with 3 roles (admin, front_office, dme), `require_role()` route guards, 15-min session timeout | Done |
+| **Audit Controls** | `AuditMiddleware` logs all PHI route access to `phi_audit_log`; failed login attempts persisted | Done |
+| **Transmission Security** | TLS 1.2/1.3 (nginx), HSTS, HttpOnly+Secure+SameSite cookies, `Cache-Control: no-store` | Done |
+| **Integrity Controls** | Pydantic v2 input validation, parameterized SQL queries, CSP headers | Done |
+| **Encryption at Rest** | SQLite unencrypted (dev only) — PostgreSQL + encrypted EBS required for production | TODO |
+| **Automatic Logoff** | 15-minute inactivity timeout via JWT `last_activity` claim | Done |
+| **Unique User ID** | `admin_users.id` + unique username per user | Done |
+| **Emergency Access** | Not yet implemented | TODO |
+
+### LLM Provider HIPAA Safety
+
+Production startup blocks non-HIPAA-safe LLM providers. Only `ollama` (local, no data transmission) and `bedrock` (HIPAA-eligible under AWS BAA) are allowed when `APP_ENV=production`. Cloud providers (grok, openai, anthropic) require a signed BAA before handling PHI — the app will refuse to start with these in production until the validation is removed after BAA confirmation.
+
+To use Bedrock (recommended for production):
+
+```bash
+LLM_PROVIDER=bedrock
+BEDROCK_REGION=us-east-1
+```
+
+To use Ollama (fully local, no PHI transmission):
+
+```bash
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
+```
+
+### AI Safety Controls
+
+| Control | Description |
+| ------- | ----------- |
+| **Prompt injection sanitization** | OCR text is sanitized before LLM processing — common injection patterns are stripped |
+| **System prompt hardening** | All extraction prompts include instructions to ignore embedded commands in document text |
+| **Confidence scoring** | LLM returns a 0.0–1.0 confidence score with every extraction for human review calibration |
+| **Human-in-the-loop** | Referrals require human approval (REVIEW status) before EMR push. Prescriptions require human approval before DME order creation |
+| **Stateless extraction** | Each LLM call is single-turn with no conversation history — no cross-patient context contamination |
+| **No PHI in logs** | Application logs use IDs only. FHIR error responses are logged by status code, not response body |
+
+### Test Data & De-Identification
+
+All included test data is entirely synthetic. Names, addresses, insurance IDs, and other identifiers are fictional and generated for workflow testing only.
+
+- **Stub FHIR** (`USE_STUB_FHIR=true`): 5 fictional patients with insurance and prescriptions — full pipeline works with zero EMR credentials
+- **Dummy faxes**: Generated by `scripts/generate_dummy_faxes.py` — realistic format, synthetic content
+- **DME demo orders**: Auto-seeded if table is empty — fictional patient pool from stub data
+
+For production deployments, never add real EMR exports or patient records to the codebase. All test fixtures are gitignored or generated at runtime.
+
+### Data Retention
+
+HIPAA requires 6-year audit log retention. The `phi_audit_log` table retains all access records indefinitely. A formal retention and archival policy must be documented and implemented before production launch, including:
+
+- Audit log retention: 6 years minimum
+- Patient record archival schedule
+- Deletion request handling (state privacy laws)
+
+### Pre-Production Checklist
+
+**Critical (blockers):**
+
+- [ ] PostgreSQL with encrypted disk (replace SQLite)
+- [ ] Strong `APP_SECRET_KEY` (not default) — startup validates this
+- [ ] BAA with LLM provider if using cloud AI (grok, openai, anthropic)
+- [ ] Documented data retention and audit log archival policy
+
+**Important:**
+
+- [ ] Persistent rate limiter (Redis or DB-backed, not in-memory)
+- [ ] MFA / 2FA for admin login
+- [ ] Database backup automation + encrypted offsite storage
+- [ ] WAF in front of nginx
+- [ ] `pip audit` + `npm audit` — zero high/critical vulnerabilities
+- [ ] Penetration test by third party

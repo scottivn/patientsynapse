@@ -61,10 +61,11 @@ IncomingFaxes/
 
 # Project
 plan.md
+TODO.md
+COMMANDS.md
 
 # Claude (local config, memory, project instructions)
 .claude/
 CLAUDE.md
 
-# Vendored assets
-server/static/swagger-ui/
+# Vendored assets (swagger-ui is committed — required for /docs in dev mode)

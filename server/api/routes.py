@@ -4,7 +4,7 @@ import logging
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from dataclasses import asdict
 from collections import defaultdict
 
@@ -163,6 +163,17 @@ async def admin_login(body: AdminLogin, request: Request, response: Response):
     user = await get_user_by_username(body.username)
     if not user or not verify_password(body.password, user["password_hash"]):
         _login_limiter.record(client_ip, success=False)
+        # Persist failed login to audit log for HIPAA compliance
+        from server.auth.audit import log_phi_access
+        import asyncio
+        asyncio.create_task(log_phi_access(
+            user_type="unauthenticated",
+            user_id=body.username,
+            action="LOGIN_FAILED",
+            resource_type="auth",
+            ip_address=client_ip,
+            user_agent=request.headers.get("user-agent", "")[:200],
+        ))
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not user.get("is_active", 1):
@@ -496,6 +507,130 @@ async def reset_fax_inbox():
     return {"message": "Fax inbox reset", "status": await svc.get_status()}
 
 
+@router.post("/faxes/retry-failed", tags=["Fax Ingestion"], dependencies=[Depends(require_role("admin", "front_office"))])
+async def retry_failed_faxes():
+    """Clear failed fax entries and reprocess them."""
+    svc = get_fax_ingestion_service()
+    records = await svc.retry_failed()
+    return {
+        "retried": len(records),
+        "referrals": [_serialize_referral(r) for r in records],
+        "status": await svc.get_status(),
+    }
+
+
+@router.get("/faxes/file/{filename}/info", tags=["Fax Ingestion"], dependencies=[Depends(require_role("admin", "front_office"))])
+async def fax_file_info(filename: str):
+    """Get metadata about a fax file (page count, content type, size)."""
+    svc = get_fax_ingestion_service()
+    file_path = _resolve_fax_path(svc.inbox_dir, filename)
+
+    ext = file_path.suffix.lower()
+    content_type = _fax_content_type(ext)
+    size_bytes = file_path.stat().st_size
+    pages = 1
+
+    if ext == ".pdf":
+        import fitz
+        doc = fitz.open(str(file_path))
+        pages = len(doc)
+        doc.close()
+    elif ext in (".tiff", ".tif"):
+        from PIL import Image
+        img = Image.open(file_path)
+        try:
+            pages = img.n_frames
+        except Exception:
+            pages = 1
+        img.close()
+
+    return {"pages": pages, "content_type": content_type, "size_bytes": size_bytes}
+
+
+@router.get("/faxes/file/{filename}/page/{page_num}", tags=["Fax Ingestion"], dependencies=[Depends(require_role("admin", "front_office"))])
+async def fax_file_page(filename: str, page_num: int):
+    """Render a specific page of a fax file as PNG (for TIFF/PDF viewing in browser)."""
+    svc = get_fax_ingestion_service()
+    file_path = _resolve_fax_path(svc.inbox_dir, filename)
+
+    ext = file_path.suffix.lower()
+    import io
+
+    if ext == ".pdf":
+        import fitz
+        doc = fitz.open(str(file_path))
+        num_pages = len(doc)
+        if page_num < 0 or page_num >= num_pages:
+            doc.close()
+            raise HTTPException(404, f"Page {page_num} not found (document has {num_pages} pages)")
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=200)
+        png_bytes = pix.tobytes("png")
+        doc.close()
+        return Response(content=png_bytes, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    elif ext in (".tiff", ".tif"):
+        from PIL import Image
+        img = Image.open(file_path)
+        try:
+            img.seek(page_num)
+        except EOFError:
+            raise HTTPException(404, f"Page {page_num} not found")
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="PNG")
+        return Response(content=buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    elif ext in (".png", ".jpg", ".jpeg"):
+        if page_num != 0:
+            raise HTTPException(404, "Single-page image, only page 0 exists")
+        return Response(
+            content=file_path.read_bytes(),
+            media_type=_fax_content_type(ext),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    raise HTTPException(400, f"Unsupported file type: {ext}")
+
+
+@router.get("/faxes/file/{filename}", tags=["Fax Ingestion"], dependencies=[Depends(require_role("admin", "front_office"))])
+async def serve_fax_file(filename: str):
+    """Serve an original fax file for viewing. Path traversal protected."""
+    from fastapi.responses import FileResponse
+    svc = get_fax_ingestion_service()
+    file_path = _resolve_fax_path(svc.inbox_dir, filename)
+
+    ext = file_path.suffix.lower()
+    return FileResponse(
+        path=str(file_path),
+        media_type=_fax_content_type(ext),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _resolve_fax_path(inbox_dir: Path, filename: str) -> Path:
+    """Resolve a fax filename against inbox_dir with path traversal protection."""
+    if "/" in filename or "\\" in filename or ".." in filename or "\x00" in filename:
+        raise HTTPException(400, "Invalid filename")
+    file_path = (inbox_dir / filename).resolve()
+    if not str(file_path).startswith(str(inbox_dir.resolve())):
+        raise HTTPException(400, "Invalid filename")
+    if not file_path.is_file():
+        raise HTTPException(404, "File not found")
+    return file_path
+
+
+def _fax_content_type(ext: str) -> str:
+    """Map file extension to content type."""
+    return {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".tiff": "image/tiff",
+        ".tif": "image/tiff",
+    }.get(ext, "application/octet-stream")
+
+
 # ---- Scheduling routes ----
 
 @router.get("/scheduling/providers", tags=["Scheduling"], dependencies=[Depends(require_role("admin", "front_office"))])
@@ -566,12 +701,58 @@ async def patient_billing(patient_id: str):
 async def rcm_dashboard():
     """Get RCM dashboard summary."""
     settings = get_settings()
+    # Pull live DME order stats from DB
+    dme_stats = await _dme_service.get_dashboard()
+
     if settings.use_stub_fhir:
         return {
+            # Referral pipeline
             "referrals_processed": 142,
             "referrals_pending": 17,
             "referrals_approved": 118,
             "referrals_rejected": 7,
+            # Live DME stats from DB
+            "dme_orders_total": dme_stats.get("total", 0),
+            "dme_orders_fulfilled": dme_stats.get("fulfilled", 0),
+            "dme_orders_in_progress": dme_stats.get("in_progress", 0),
+            # Revenue estimates
+            "revenue": {
+                "collected_mtd": 28_450.00,
+                "collected_ytd": 187_320.00,
+                "outstanding": 42_180.00,
+                "avg_reimbursement": 312.50,
+            },
+            # A/R aging buckets
+            "ar_aging": [
+                {"bucket": "0-30 days", "amount": 18_200.00, "count": 42},
+                {"bucket": "31-60 days", "amount": 12_450.00, "count": 28},
+                {"bucket": "61-90 days", "amount": 7_830.00, "count": 15},
+                {"bucket": "90+ days", "amount": 3_700.00, "count": 8},
+            ],
+            # Claims pipeline
+            "claims": {
+                "submitted": 89,
+                "paid": 72,
+                "denied": 11,
+                "pending": 6,
+                "denial_rate": 12.4,
+            },
+            # Top denial reasons
+            "denial_reasons": [
+                {"reason": "Missing prior authorization", "count": 4, "percent": 36.4},
+                {"reason": "Non-covered service", "count": 3, "percent": 27.3},
+                {"reason": "Patient not eligible on DOS", "count": 2, "percent": 18.2},
+                {"reason": "Duplicate claim", "count": 1, "percent": 9.1},
+                {"reason": "Timely filing exceeded", "count": 1, "percent": 9.1},
+            ],
+            # Revenue by payer
+            "revenue_by_payer": [
+                {"payer": "Blue Cross Blue Shield", "amount": 63_780.00, "claims": 31},
+                {"payer": "Medicare", "amount": 48_250.00, "claims": 26},
+                {"payer": "UnitedHealthcare", "amount": 32_100.00, "claims": 18},
+                {"payer": "Aetna", "amount": 24_890.00, "claims": 14},
+                {"payer": "Humana", "amount": 18_300.00, "claims": 11},
+            ],
             "payer_mix": [
                 {"payer": "Blue Cross Blue Shield", "percent": 34.2},
                 {"payer": "UnitedHealthcare", "percent": 22.5},
@@ -586,6 +767,15 @@ async def rcm_dashboard():
                 {"code": "I10", "display": "Essential hypertension", "count": 15},
                 {"code": "M54.5", "display": "Low back pain", "count": 12},
             ],
+            # Monthly trend (last 6 months)
+            "monthly_trend": [
+                {"month": "Oct 2025", "revenue": 26_100.00, "claims": 68},
+                {"month": "Nov 2025", "revenue": 29_800.00, "claims": 74},
+                {"month": "Dec 2025", "revenue": 31_200.00, "claims": 79},
+                {"month": "Jan 2026", "revenue": 33_450.00, "claims": 82},
+                {"month": "Feb 2026", "revenue": 38_320.00, "claims": 91},
+                {"month": "Mar 2026", "revenue": 28_450.00, "claims": 76},
+            ],
         }
     emr = get_emr()
     return {
@@ -593,8 +783,17 @@ async def rcm_dashboard():
         "referrals_pending": 0,
         "referrals_approved": 0,
         "referrals_rejected": 0,
+        "dme_orders_total": dme_stats.get("total", 0),
+        "dme_orders_fulfilled": dme_stats.get("fulfilled", 0),
+        "dme_orders_in_progress": dme_stats.get("in_progress", 0),
+        "revenue": {"collected_mtd": 0, "collected_ytd": 0, "outstanding": 0, "avg_reimbursement": 0},
+        "ar_aging": [],
+        "claims": {"submitted": 0, "paid": 0, "denied": 0, "pending": 0, "denial_rate": 0},
+        "denial_reasons": [],
+        "revenue_by_payer": [],
         "payer_mix": [],
         "top_diagnoses": [],
+        "monthly_trend": [],
         "message": f"Connect to {emr.name} for live data",
     }
 
@@ -716,7 +915,12 @@ class DMEPatientConfirm(BaseModel):
     phone: Optional[str] = None
     fulfillment_method: str = "not_selected"  # "pickup" or "ship"
     patient_notes: Optional[str] = None
+    selected_items: Optional[List[str]] = None  # for bundle orders
     skip: bool = False
+
+class DMEPatientReject(BaseModel):
+    reason: str = ""
+    callback_requested: bool = False
 
 class DMEMarkOrdered(BaseModel):
     vendor_name: str = ""
@@ -889,6 +1093,13 @@ async def dme_equipment_categories():
 async def dme_dashboard():
     """DME summary stats for the admin portal."""
     return await _dme_service.get_dashboard()
+
+
+@router.get("/dme/orders/expiring-encounters", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_expiring_encounters(days: int = 14):
+    """Get orders with encounters expiring within the threshold."""
+    orders = await _dme_service.get_expiring_encounter_orders(days)
+    return [_serialize_dme_order(o) for o in orders]
 
 
 @router.get("/dme/orders/{order_id}", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
@@ -1093,6 +1304,42 @@ async def submit_dme_confirmation(token: str, body: DMEPatientConfirm):
     return _dme_service.get_patient_safe_order(order)
 
 
+@router.post("/dme/confirm/{token}/reject", tags=["DME Patient Portal"])
+async def reject_dme_confirmation(token: str, body: DMEPatientReject):
+    """Patient flags an issue with their order. PUBLIC endpoint — token-gated."""
+    order = await _dme_service.patient_reject_order(
+        token, body.reason, body.callback_requested,
+    )
+    if not order:
+        raise HTTPException(404, "This link is invalid or has expired. Please contact our office.")
+    return {"status": "received", "message": "We'll review this and get back to you."}
+
+
+@router.post("/dme/process-auto-deliveries", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_process_auto_deliveries():
+    """Fulfill orders whose auto-deliver timer has expired."""
+    fulfilled = await _dme_service.process_auto_deliveries()
+    return {"fulfilled": len(fulfilled), "order_ids": [o.id for o in fulfilled]}
+
+
+@router.get("/dme/orders/{order_id}/receipt", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_order_receipt(order_id: str):
+    """Generate receipt data for a fulfilled order."""
+    data = await _dme_service.generate_receipt(order_id)
+    if not data:
+        raise HTTPException(404, "Order not found")
+    return data
+
+
+@router.get("/dme/orders/{order_id}/delivery-ticket", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_order_delivery_ticket(order_id: str):
+    """Generate delivery ticket data for shipping/pickup."""
+    data = await _dme_service.generate_delivery_ticket(order_id)
+    if not data:
+        raise HTTPException(404, "Order not found")
+    return data
+
+
 # ---- Helpers ----
 
 def _serialize_dme_order(order) -> dict:
@@ -1153,6 +1400,34 @@ async def get_prescription(doc_id: str):
     rx = await _prescription_monitor.get_prescription(doc_id)
     if not rx:
         raise HTTPException(404, "Prescription not found")
+    return _prescription_monitor._serialize(rx)
+
+
+class PrescriptionReject(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/prescriptions/{doc_id}/approve", tags=["Prescriptions"], dependencies=[Depends(require_role("admin", "dme"))])
+async def approve_prescription(doc_id: str):
+    """Approve a reviewed prescription and create the DME order."""
+    if not _prescription_monitor:
+        raise HTTPException(503, "Prescription monitor not initialized")
+    try:
+        rx = await _prescription_monitor.approve_prescription(doc_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _prescription_monitor._serialize(rx)
+
+
+@router.post("/prescriptions/{doc_id}/reject", tags=["Prescriptions"], dependencies=[Depends(require_role("admin", "dme"))])
+async def reject_prescription(doc_id: str, body: PrescriptionReject):
+    """Reject a reviewed prescription — no DME order will be created."""
+    if not _prescription_monitor:
+        raise HTTPException(503, "Prescription monitor not initialized")
+    try:
+        rx = await _prescription_monitor.reject_prescription(doc_id, body.reason or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return _prescription_monitor._serialize(rx)
 
 

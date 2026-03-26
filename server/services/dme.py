@@ -143,6 +143,8 @@ COMPLIANCE_REQUIRED_CATEGORIES = [
 ]
 
 # Common supply bundles that get ordered together
+VENDOR_OPTIONS = ["In-House", "PPM", "VGM"]
+
 SUPPLY_BUNDLES = {
     "Full Resupply (Full Face)": [
         "CPAP Mask — Full Face", "Mask Cushion / Pillow Replacement",
@@ -201,6 +203,8 @@ class DMEOrder:
     equipment_category: str = ""
     equipment_description: str = ""
     quantity: int = 1
+    bundle_items: List[str] = field(default_factory=list)      # individual items in a bundle order
+    selected_items: List[str] = field(default_factory=list)    # items patient chose to keep
 
     # Clinical
     diagnosis_code: str = ""
@@ -248,6 +252,9 @@ class DMEOrder:
     confirmation_responded_at: Optional[str] = None
     patient_confirmed_address: bool = False        # patient verified their address
     patient_notes: str = ""                        # anything patient typed in response
+    patient_rejected: bool = False                 # patient flagged something wrong
+    patient_rejection_reason: str = ""             # what the patient said was wrong
+    patient_callback_requested: bool = False       # patient wants a call back
 
     # Fulfillment
     fulfillment_method: str = FulfillmentMethod.NOT_SELECTED
@@ -260,6 +267,7 @@ class DMEOrder:
     estimated_delivery_date: Optional[str] = None
     pickup_ready_date: Optional[str] = None
     fulfilled_at: Optional[str] = None
+    auto_deliver_after: Optional[str] = None       # ISO datetime to auto-fulfill
 
     # Staff workflow
     assigned_to: Optional[str] = None              # staff member working this order
@@ -307,7 +315,7 @@ class DMEOrder:
             DMEOrderStatus.APPROVED: "Approved — we'll reach out shortly",
             DMEOrderStatus.PATIENT_CONTACTED: "Action needed — please confirm your details",
             DMEOrderStatus.PATIENT_CONFIRMED: "Confirmed — ordering your supplies",
-            DMEOrderStatus.ORDERING: "Order placed with supplier",
+            DMEOrderStatus.ORDERING: "Being fulfilled",
             DMEOrderStatus.SHIPPED: "Shipped" if self.fulfillment_method == FulfillmentMethod.SHIP else "Ready for pickup",
             DMEOrderStatus.FULFILLED: "Delivered",
             DMEOrderStatus.REJECTED: "Unable to process — please contact our office",
@@ -373,6 +381,18 @@ def _row_to_order(row: dict) -> DMEOrder:
     except (json.JSONDecodeError, TypeError):
         pass
 
+    bundle_items = []
+    try:
+        bundle_items = json.loads(row.get("bundle_items", "[]") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    selected_items = []
+    try:
+        selected_items = json.loads(row.get("selected_items", "[]") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        pass
+
     ins_verified = row.get("insurance_verified")
     if ins_verified is not None:
         ins_verified = bool(ins_verified)
@@ -396,6 +416,8 @@ def _row_to_order(row: dict) -> DMEOrder:
         equipment_category=row.get("equipment_category", ""),
         equipment_description=row.get("equipment_description", ""),
         quantity=row.get("quantity", 1),
+        bundle_items=bundle_items,
+        selected_items=selected_items,
         diagnosis_code=row.get("diagnosis_code", ""),
         diagnosis_description=row.get("diagnosis_description", ""),
         referring_physician=row.get("referring_physician", ""),
@@ -427,6 +449,9 @@ def _row_to_order(row: dict) -> DMEOrder:
         confirmation_responded_at=row.get("confirmation_responded_at"),
         patient_confirmed_address=bool(row.get("patient_confirmed_address", 0)),
         patient_notes=row.get("patient_notes", ""),
+        patient_rejected=bool(row.get("patient_rejected", 0)),
+        patient_rejection_reason=row.get("patient_rejection_reason", ""),
+        patient_callback_requested=bool(row.get("patient_callback_requested", 0)),
         fulfillment_method=row.get("fulfillment_method", FulfillmentMethod.NOT_SELECTED),
         shipping_fee=row.get("shipping_fee"),
         shipping_tracking_number=row.get("shipping_tracking_number"),
@@ -437,6 +462,7 @@ def _row_to_order(row: dict) -> DMEOrder:
         estimated_delivery_date=row.get("estimated_delivery_date"),
         pickup_ready_date=row.get("pickup_ready_date"),
         fulfilled_at=row.get("fulfilled_at"),
+        auto_deliver_after=row.get("auto_deliver_after"),
         assigned_to=row.get("assigned_to"),
         staff_notes=row.get("staff_notes", ""),
         hold_reason=row.get("hold_reason", ""),
@@ -453,6 +479,8 @@ async def _save_order(order: DMEOrder) -> None:
     docs_json = json.dumps([asdict(d) for d in order.documents])
     hcpcs_json = json.dumps(order.hcpcs_codes)
     pricing_json = json.dumps(order.pricing_details)
+    bundle_json = json.dumps(order.bundle_items)
+    selected_json = json.dumps(order.selected_items)
     ins_verified = None if order.insurance_verified is None else int(order.insurance_verified)
 
     await db_execute(
@@ -462,6 +490,7 @@ async def _save_order(order: DMEOrder) -> None:
                patient_state, patient_zip, patient_id,
                insurance_payer, insurance_member_id, insurance_group,
                equipment_category, equipment_description, quantity,
+               bundle_items, selected_items,
                diagnosis_code, diagnosis_description, referring_physician,
                referring_npi, clinical_notes,
                last_encounter_date, last_encounter_type, last_encounter_provider,
@@ -475,16 +504,19 @@ async def _save_order(order: DMEOrder) -> None:
                confirmation_token, confirmation_token_expires, confirmation_sent_at,
                confirmation_sent_via, confirmation_responded_at,
                patient_confirmed_address, patient_notes,
+               patient_rejected, patient_rejection_reason, patient_callback_requested,
                fulfillment_method, shipping_fee, shipping_tracking_number,
                shipping_carrier, vendor_name, vendor_order_id, vendor_ordered_at,
                estimated_delivery_date, pickup_ready_date, fulfilled_at,
+               auto_deliver_after,
                assigned_to, staff_notes, hold_reason,
                insurance_verified, insurance_notes, rejection_reason,
                created_at, updated_at
            ) VALUES (
-               ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,?,?,?,
-               ?,?,?,?, ?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,
-               ?,?,?,?,?, ?,?, ?,?,?,?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?
+               ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,
+               ?,?,?,?,?, ?,?,?,?, ?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,
+               ?,?,?,?,?, ?,?, ?,?,?, ?,?,?,?,?,?,?, ?,?,?, ?,
+               ?,?,?, ?,?,?, ?,?
            )
            ON CONFLICT(id) DO UPDATE SET
                status=excluded.status,
@@ -504,6 +536,8 @@ async def _save_order(order: DMEOrder) -> None:
                equipment_category=excluded.equipment_category,
                equipment_description=excluded.equipment_description,
                quantity=excluded.quantity,
+               bundle_items=excluded.bundle_items,
+               selected_items=excluded.selected_items,
                diagnosis_code=excluded.diagnosis_code,
                diagnosis_description=excluded.diagnosis_description,
                referring_physician=excluded.referring_physician,
@@ -535,6 +569,9 @@ async def _save_order(order: DMEOrder) -> None:
                confirmation_responded_at=excluded.confirmation_responded_at,
                patient_confirmed_address=excluded.patient_confirmed_address,
                patient_notes=excluded.patient_notes,
+               patient_rejected=excluded.patient_rejected,
+               patient_rejection_reason=excluded.patient_rejection_reason,
+               patient_callback_requested=excluded.patient_callback_requested,
                fulfillment_method=excluded.fulfillment_method,
                shipping_fee=excluded.shipping_fee,
                shipping_tracking_number=excluded.shipping_tracking_number,
@@ -545,6 +582,7 @@ async def _save_order(order: DMEOrder) -> None:
                estimated_delivery_date=excluded.estimated_delivery_date,
                pickup_ready_date=excluded.pickup_ready_date,
                fulfilled_at=excluded.fulfilled_at,
+               auto_deliver_after=excluded.auto_deliver_after,
                assigned_to=excluded.assigned_to,
                staff_notes=excluded.staff_notes,
                hold_reason=excluded.hold_reason,
@@ -558,6 +596,7 @@ async def _save_order(order: DMEOrder) -> None:
          order.patient_zip, order.patient_id,
          order.insurance_payer, order.insurance_member_id, order.insurance_group,
          order.equipment_category, order.equipment_description, order.quantity,
+         bundle_json, selected_json,
          order.diagnosis_code, order.diagnosis_description, order.referring_physician,
          order.referring_npi, order.clinical_notes,
          order.last_encounter_date, order.last_encounter_type,
@@ -572,10 +611,13 @@ async def _save_order(order: DMEOrder) -> None:
          order.confirmation_sent_at, order.confirmation_sent_via,
          order.confirmation_responded_at,
          int(order.patient_confirmed_address), order.patient_notes,
+         int(order.patient_rejected), order.patient_rejection_reason,
+         int(order.patient_callback_requested),
          order.fulfillment_method, order.shipping_fee, order.shipping_tracking_number,
          order.shipping_carrier, order.vendor_name, order.vendor_order_id,
          order.vendor_ordered_at, order.estimated_delivery_date,
          order.pickup_ready_date, order.fulfilled_at,
+         order.auto_deliver_after,
          order.assigned_to, order.staff_notes, order.hold_reason,
          ins_verified, order.insurance_notes, order.rejection_reason,
          order.created_at, order.updated_at),
@@ -635,6 +677,12 @@ class DMEService:
             hcpcs_codes=data.get("hcpcs_codes", []),
             supply_months=data.get("supply_months", 6),
         )
+
+        # Populate bundle items if the description matches a known bundle
+        desc = order.equipment_description
+        if desc in SUPPLY_BUNDLES:
+            order.bundle_items = list(SUPPLY_BUNDLES[desc])
+            order.selected_items = list(SUPPLY_BUNDLES[desc])
 
         if order.auto_replace and order.auto_replace_frequency:
             order.next_replace_date = self._compute_next_date(order.auto_replace_frequency)
@@ -828,6 +876,13 @@ class DMEService:
         method = data.get("fulfillment_method", FulfillmentMethod.NOT_SELECTED)
         if method in (FulfillmentMethod.PICKUP, FulfillmentMethod.SHIP, "pickup", "ship"):
             order.fulfillment_method = method
+            if method in (FulfillmentMethod.SHIP, "ship"):
+                order.shipping_fee = 15.00
+
+        # Handle selected items for bundle orders
+        selected = data.get("selected_items")
+        if selected is not None and order.bundle_items:
+            order.selected_items = [s for s in selected if s in order.bundle_items]
 
         if data.get("patient_notes"):
             order.patient_notes = data["patient_notes"]
@@ -861,6 +916,8 @@ class DMEService:
             "shipping_carrier": order.shipping_carrier,
             "estimated_delivery_date": order.estimated_delivery_date,
             "pickup_ready_date": order.pickup_ready_date,
+            "bundle_items": order.bundle_items,
+            "selected_items": order.selected_items,
             "auto_replace": order.auto_replace,
             "auto_replace_frequency": order.auto_replace_frequency,
             "next_replace_date": order.next_replace_date,
@@ -899,6 +956,9 @@ class DMEService:
             order.estimated_delivery_date = estimated_delivery
         if order.fulfillment_method == FulfillmentMethod.PICKUP:
             order.pickup_ready_date = date.today().isoformat()
+            order.auto_deliver_after = datetime.now().isoformat()  # immediate for pickup
+        else:
+            order.auto_deliver_after = (datetime.now() + timedelta(days=7)).isoformat()
         order.updated_at = datetime.now().isoformat()
         await _save_order(order)
         return order
@@ -1074,6 +1134,115 @@ class DMEService:
             "in_progress": len(await self.get_in_progress()),
             "encounter_expired": len(await self.get_encounter_expired()),
         }
+
+    # ── Patient rejection ──────────────────────────────────────
+
+    async def patient_reject_order(self, token: str, reason: str = "",
+                                    callback_requested: bool = False) -> Optional[DMEOrder]:
+        """Patient flags an issue with their order via the confirmation link."""
+        order = await self.validate_confirmation_token(token)
+        if not order:
+            return None
+        order.patient_rejected = True
+        order.patient_rejection_reason = reason
+        order.patient_callback_requested = callback_requested
+        order.status = DMEOrderStatus.ON_HOLD
+        order.hold_reason = f"Patient flagged issue: {reason}" if reason else "Patient flagged issue"
+        order.confirmation_responded_at = datetime.now().isoformat()
+        order.updated_at = datetime.now().isoformat()
+        logger.info(f"DME order {order.id} rejected by patient (callback={callback_requested})")
+        await _save_order(order)
+        return order
+
+    # ── Auto-deliver ─────────────────────────────────────────
+
+    async def process_auto_deliveries(self) -> List[DMEOrder]:
+        """Fulfill orders whose auto-deliver timer has expired."""
+        now = datetime.now().isoformat()
+        rows = await db_fetch_all(
+            "SELECT * FROM dme_orders WHERE status = ? AND auto_deliver_after IS NOT NULL AND auto_deliver_after <= ?",
+            (DMEOrderStatus.SHIPPED.value, now),
+        )
+        fulfilled = []
+        for row in rows:
+            order = _row_to_order(row)
+            order.status = DMEOrderStatus.FULFILLED
+            order.fulfilled_at = datetime.now().isoformat()
+            order.updated_at = datetime.now().isoformat()
+            if order.auto_replace and order.auto_replace_frequency:
+                order.next_replace_date = self._compute_next_date(order.auto_replace_frequency)
+            await _save_order(order)
+            fulfilled.append(order)
+            logger.info(f"DME order {order.id} auto-fulfilled")
+        return fulfilled
+
+    # ── Expiring encounter queue ─────────────────────────────
+
+    async def get_expiring_encounter_orders(self, days_threshold: int = 14) -> List[DMEOrder]:
+        """Get active orders with encounters expiring within the threshold."""
+        excluded = [DMEOrderStatus.FULFILLED.value, DMEOrderStatus.REJECTED.value,
+                    DMEOrderStatus.CANCELLED.value]
+        placeholders = ",".join("?" * len(excluded))
+        rows = await db_fetch_all(
+            f"SELECT * FROM dme_orders WHERE status NOT IN ({placeholders}) AND last_encounter_date IS NOT NULL ORDER BY last_encounter_date ASC",
+            tuple(excluded),
+        )
+        orders = [_row_to_order(r) for r in rows]
+        return [o for o in orders if o.encounter_expires_in_days is not None
+                and 0 < o.encounter_expires_in_days <= days_threshold]
+
+    # ── Receipt & delivery ticket ────────────────────────────
+
+    async def generate_receipt(self, order_id: str) -> Optional[dict]:
+        """Generate structured receipt data for a fulfilled order."""
+        order = await self.get_order(order_id)
+        if not order:
+            return None
+        items = order.selected_items if order.selected_items else [order.equipment_description]
+        return {
+            "order_id": order.id,
+            "date": order.fulfilled_at or order.updated_at,
+            "patient_name": order.patient_name,
+            "patient_dob": order.patient_dob,
+            "items": items,
+            "equipment_category": order.equipment_category,
+            "hcpcs_codes": order.hcpcs_codes,
+            "insurance_payer": order.insurance_payer,
+            "insurance_member_id": order.insurance_member_id,
+            "vendor": order.vendor_name or "In-House",
+            "fulfillment_method": order.fulfillment_method,
+            "shipping_fee": order.shipping_fee,
+            "diagnosis_code": order.diagnosis_code,
+            "diagnosis_description": order.diagnosis_description,
+            "referring_physician": order.referring_physician,
+        }
+
+    async def generate_delivery_ticket(self, order_id: str) -> Optional[dict]:
+        """Generate delivery ticket data for shipping/pickup."""
+        order = await self.get_order(order_id)
+        if not order:
+            return None
+        items = order.selected_items if order.selected_items else [order.equipment_description]
+        return {
+            "order_id": order.id,
+            "patient_name": order.patient_name,
+            "items": items,
+            "equipment_category": order.equipment_category,
+            "fulfillment_method": order.fulfillment_method,
+            "shipping_address": {
+                "address": order.patient_address,
+                "city": order.patient_city,
+                "state": order.patient_state,
+                "zip": order.patient_zip,
+            } if order.fulfillment_method == FulfillmentMethod.SHIP else None,
+            "tracking_number": order.shipping_tracking_number,
+            "carrier": order.shipping_carrier,
+            "shipped_at": order.vendor_ordered_at,
+            "fulfilled_at": order.fulfilled_at,
+            "vendor": order.vendor_name or "In-House",
+        }
+
+    # ── Demo data ────────────────────────────────────────────
 
     async def seed_demo_data(self):
         """Populate with realistic sleep-medicine DME orders across all workflow stages."""

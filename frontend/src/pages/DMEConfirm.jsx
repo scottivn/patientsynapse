@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Package, MapPin, Truck, Store, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, MessageSquare } from 'lucide-react'
-import { validateDMEConfirmation, submitDMEConfirmation } from '../services/api'
+import { validateDMEConfirmation, submitDMEConfirmation, rejectDMEConfirmation } from '../services/api'
 
 const STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
@@ -71,6 +71,11 @@ export default function DMEConfirm() {
   const [phone, setPhone] = useState('')
   const [fulfillment, setFulfillment] = useState('')
   const [notes, setNotes] = useState('')
+  const [selectedItems, setSelectedItems] = useState([])
+  const [showRejectForm, setShowRejectForm] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [wantCallback, setWantCallback] = useState(false)
+  const [rejected, setRejected] = useState(false)
 
   useEffect(() => {
     validateDMEConfirmation(token)
@@ -82,6 +87,9 @@ export default function DMEConfirm() {
         setZip(data.patient_zip || '')
         setPhone(data.patient_phone || '')
         setFulfillment(data.fulfillment_method !== 'not_selected' ? data.fulfillment_method : '')
+        if (data.bundle_items?.length) {
+          setSelectedItems(data.selected_items?.length ? data.selected_items : [...data.bundle_items])
+        }
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -96,6 +104,7 @@ export default function DMEConfirm() {
         address, city, state, zip, phone,
         fulfillment_method: fulfillment,
         patient_notes: notes || undefined,
+        selected_items: order.bundle_items?.length ? selectedItems : undefined,
       })
       setOrder(result)
       setSubmitted(true)
@@ -120,6 +129,24 @@ export default function DMEConfirm() {
     }
   }
 
+  const handleReject = async () => {
+    setSubmitting(true)
+    try {
+      await rejectDMEConfirmation(token, rejectReason, wantCallback)
+      setRejected(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const toggleItem = (item) => {
+    setSelectedItems(prev =>
+      prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]
+    )
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -138,6 +165,28 @@ export default function DMEConfirm() {
           <p className="text-gray-500 text-sm mt-4">
             If you need help, please call our office at <span className="font-medium">(210) 555-0100</span>.
           </p>
+        </div>
+      </div>
+    )
+  }
+
+  // Patient rejected — show acknowledgment
+  if (rejected) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="max-w-lg mx-auto mt-8">
+          <div className="bg-white rounded-lg shadow-sm border p-6 text-center">
+            <MessageSquare className="w-12 h-12 text-blue-500 mx-auto mb-3" />
+            <h1 className="text-xl font-semibold text-gray-900">We've received your feedback</h1>
+            <p className="text-gray-600 text-sm mt-2">
+              {wantCallback
+                ? "A team member will call you shortly to resolve this."
+                : "Our team will review your feedback and reach out if needed."}
+            </p>
+            <p className="text-center text-xs text-gray-400 mt-6">
+              Questions? Call <span className="font-medium">(210) 555-0100</span>
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -238,6 +287,22 @@ export default function DMEConfirm() {
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6">
             <p className="text-sm font-medium text-blue-900">{order.equipment_description}</p>
             <p className="text-xs text-blue-700 mt-1">{order.equipment_category}</p>
+            {order.bundle_items?.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-medium text-blue-800">Included supplies — uncheck any you don't need:</p>
+                {order.bundle_items.map(item => (
+                  <label key={item} className="flex items-center gap-2 text-sm text-blue-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedItems.includes(item)}
+                      onChange={() => toggleItem(item)}
+                      className="rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    {item}
+                  </label>
+                ))}
+              </div>
+            )}
             {order.auto_replace && (
               <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
                 <Clock className="w-3 h-3" /> Auto-refill — {order.auto_replace_frequency}
@@ -301,7 +366,7 @@ export default function DMEConfirm() {
                   }`}
                 >
                   <Truck className="w-6 h-6" />
-                  <span className="text-sm font-medium">Ship to me</span>
+                  <span className="text-sm font-medium">Ship to me — $15.00</span>
                   <span className="text-xs text-gray-500">Delivered to your door</span>
                 </button>
                 <button
@@ -363,6 +428,43 @@ export default function DMEConfirm() {
               I don't need supplies right now — skip this cycle
             </button>
           </form>
+
+          {/* Report issue */}
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <button
+              onClick={() => setShowRejectForm(!showRejectForm)}
+              className="text-xs text-red-500 hover:text-red-700 font-medium"
+            >
+              {showRejectForm ? 'Cancel' : "Something's not right?"}
+            </button>
+            {showRejectForm && (
+              <div className="mt-3 space-y-3 bg-red-50 border border-red-100 rounded-lg p-4">
+                <textarea
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  rows={2}
+                  placeholder="Tell us what's wrong (wrong supplies, incorrect info, etc.)"
+                  className="w-full border border-red-200 rounded-md px-3 py-2 text-sm resize-none focus:ring-red-500 focus:border-red-500"
+                />
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={wantCallback}
+                    onChange={e => setWantCallback(e.target.checked)}
+                    className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                  />
+                  Please call me to resolve this
+                </label>
+                <button
+                  onClick={handleReject}
+                  disabled={submitting}
+                  className="w-full bg-red-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-red-700 disabled:bg-gray-300 transition-colors"
+                >
+                  Report Issue
+                </button>
+              </div>
+            )}
+          </div>
 
           <p className="text-center text-xs text-gray-400 mt-6">
             Questions? Call <span className="font-medium">(210) 555-0100</span>

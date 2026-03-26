@@ -2,28 +2,35 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   FileText, Filter, Phone, Tag, FlaskConical, ShieldCheck,
-  FolderOpen, HelpCircle, RefreshCw, Inbox,
+  FolderOpen, HelpCircle, RefreshCw, Inbox, AlertTriangle, RotateCcw,
+  Pill, Package, Moon,
 } from 'lucide-react'
 import FileUpload from '../components/FileUpload'
 import StatusBadge from '../components/StatusBadge'
 import ErrorBanner from '../components/ErrorBanner'
-import { listReferrals, uploadReferralFile, uploadReferralText, pollFaxes, getFaxStatus, getStatus } from '../services/api'
+import { listReferrals, uploadReferralFile, uploadReferralText, pollFaxes, getFaxStatus, getStatus, retryFailedFaxes } from '../services/api'
 
 const STATUSES = ['all', 'review', 'processing', 'completed', 'failed', 'rejected']
 
 const DOC_TYPES = [
   { value: null, label: 'All Types', icon: Tag },
   { value: 'referral', label: 'Referrals', icon: FileText },
-  { value: 'lab_result', label: 'Lab Results', icon: FlaskConical },
+  { value: 'labs_imaging', label: 'Labs & Imaging', icon: FlaskConical },
   { value: 'insurance_auth', label: 'Insurance Auth', icon: ShieldCheck },
+  { value: 'medication_prior_auth', label: 'Med Prior Auth', icon: Pill },
+  { value: 'dme', label: 'DME', icon: Package },
+  { value: 'sleep_study_results', label: 'Sleep Studies', icon: Moon },
   { value: 'medical_records', label: 'Medical Records', icon: FolderOpen },
   { value: 'other', label: 'Other', icon: HelpCircle },
 ]
 
 const DOC_TYPE_STYLES = {
   referral: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Referral' },
-  lab_result: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Lab Result' },
+  labs_imaging: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Labs & Imaging' },
   insurance_auth: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Insurance Auth' },
+  medication_prior_auth: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Med Prior Auth' },
+  dme: { bg: 'bg-teal-100', text: 'text-teal-700', label: 'DME' },
+  sleep_study_results: { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'Sleep Study' },
   medical_records: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Medical Records' },
   other: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Other' },
 }
@@ -37,6 +44,7 @@ export default function FaxInbox() {
   const [textInput, setTextInput] = useState('')
   const [fetching, setFetching] = useState(false)
   const [faxStatus, setFaxStatus] = useState(null)
+  const [retrying, setRetrying] = useState(false)
   const [emrName, setEmrName] = useState('EMR')
   const [error, setError] = useState(null)
 
@@ -71,6 +79,22 @@ export default function FaxInbox() {
       setError(`Fax fetch failed: ${e.message}`)
     } finally {
       setFetching(false)
+    }
+  }
+
+  const handleRetryFailed = async () => {
+    setRetrying(true)
+    setError(null)
+    try {
+      const result = await retryFailedFaxes()
+      if (result.referrals?.length) {
+        load()
+      }
+      setFaxStatus(result.status)
+    } catch (e) {
+      setError(`Retry failed: ${e.message}`)
+    } finally {
+      setRetrying(false)
     }
   }
 
@@ -121,6 +145,16 @@ export default function FaxInbox() {
             {fetching ? <RefreshCw size={14} className="animate-spin" /> : <Phone size={16} />}
             {fetching ? 'Fetching...' : 'Pull Now'}
           </button>
+          {faxStatus?.errors > 0 && (
+            <button
+              onClick={handleRetryFailed}
+              disabled={retrying}
+              className="text-sm flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 font-medium transition-colors"
+            >
+              {retrying ? <RefreshCw size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+              {retrying ? 'Retrying...' : `Retry ${faxStatus.errors} Failed`}
+            </button>
+          )}
           <button
             onClick={() => setShowTextInput(!showTextInput)}
             className="btn-secondary text-sm"
@@ -140,6 +174,12 @@ export default function FaxInbox() {
             <span className="text-brand-600">{faxStatus.total_files} total files</span>
             <span className="text-brand-600">{faxStatus.pending} pending</span>
             <span className="text-brand-600">{faxStatus.processed} processed</span>
+            {faxStatus.errors > 0 && (
+              <span className="flex items-center gap-1.5 text-red-600">
+                <AlertTriangle size={13} />
+                {faxStatus.errors} errors
+              </span>
+            )}
             {faxStatus.polling_active && (
               <span className="flex items-center gap-1.5 text-green-600">
                 <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -240,11 +280,16 @@ export default function FaxInbox() {
               <Link
                 key={fax.id}
                 to={`/faxes/${fax.id}`}
-                className="card flex items-center justify-between hover:shadow-md transition-shadow"
+                className={`card flex items-center justify-between hover:shadow-md transition-shadow ${
+                  fax.status === 'failed' ? 'border-l-4 border-l-red-400 bg-red-50/50' : ''
+                }`}
               >
                 <div className="flex items-center gap-4">
-                  <div className="p-2 bg-gray-50 rounded-lg">
-                    <FileText size={20} className="text-gray-400" />
+                  <div className={`p-2 rounded-lg ${fax.status === 'failed' ? 'bg-red-100' : 'bg-gray-50'}`}>
+                    {fax.status === 'failed'
+                      ? <AlertTriangle size={20} className="text-red-400" />
+                      : <FileText size={20} className="text-gray-400" />
+                    }
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -253,6 +298,11 @@ export default function FaxInbox() {
                         {typeStyle.label}
                       </span>
                     </div>
+                    {fax.status === 'failed' && fax.error && (
+                      <p className="text-xs text-red-500 mt-0.5 truncate max-w-[500px]">
+                        Error: {fax.error}
+                      </p>
+                    )}
                     <div className="flex items-center gap-3 mt-1">
                       {isReferral && fax.extracted_data?.patient_last_name && (
                         <span className="text-xs text-gray-600">

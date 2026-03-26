@@ -35,10 +35,10 @@ class FaxIngestionService:
         )
         return row is not None
 
-    async def _mark_processed(self, filename: str, result_id: str) -> None:
+    async def _mark_processed(self, filename: str, referral_id: str) -> None:
         await db_execute(
-            "INSERT OR IGNORE INTO fax_processed (filename, result_id) VALUES (?, ?)",
-            (filename, result_id),
+            "INSERT OR IGNORE INTO fax_processed (filename, referral_id) VALUES (?, ?)",
+            (filename, referral_id),
         )
 
     async def _get_pending_files(self) -> list[str]:
@@ -125,18 +125,38 @@ class FaxIngestionService:
                 logger.error(f"Fax poll error: {e}")
             await asyncio.sleep(interval)
 
+    async def retry_failed(self) -> list[ReferralRecord]:
+        """Clear failed entries from fax_processed and reprocess them."""
+        failed_rows = await db_fetch_all(
+            "SELECT filename FROM fax_processed WHERE referral_id LIKE 'error:%'"
+        )
+        if not failed_rows:
+            return []
+
+        for row in failed_rows:
+            await db_execute(
+                "DELETE FROM fax_processed WHERE filename = ?", (row["filename"],)
+            )
+        logger.info(f"Cleared {len(failed_rows)} failed fax entries for retry")
+        return await self.poll_once()
+
     async def get_status(self) -> dict:
         """Return current ingestion status."""
         processed_count = await self._get_processed_count()
         pending_files = await self._get_pending_files()
-        rows = await db_fetch_all("SELECT filename, result_id FROM fax_processed")
-        processed_files = {r["filename"]: r["result_id"] for r in rows}
+        rows = await db_fetch_all("SELECT filename, referral_id FROM fax_processed")
+        processed_files = {r["filename"]: r["referral_id"] for r in rows}
+        error_row = await db_fetch_one(
+            "SELECT COUNT(*) as cnt FROM fax_processed WHERE referral_id LIKE 'error:%'"
+        )
+        error_count = error_row["cnt"] if error_row else 0
         return {
             "inbox_dir": str(self.inbox_dir),
             "inbox_exists": self.inbox_dir.exists(),
             "total_files": len(list(self.inbox_dir.iterdir())) if self.inbox_dir.exists() else 0,
             "processed": processed_count,
             "pending": len(pending_files),
+            "errors": error_count,
             "polling_active": self._polling,
             "processed_files": processed_files,
         }

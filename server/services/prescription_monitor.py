@@ -33,6 +33,7 @@ class RxStatus(str, Enum):
     DETECTED = "detected"          # Doc found in FHIR, not yet processed
     EXTRACTING = "extracting"      # LLM extraction in progress
     EXTRACTED = "extracted"        # LLM extraction succeeded
+    REVIEW = "review"              # Awaiting human review before DME order creation
     ORDER_CREATED = "order_created"  # DME order created from this Rx
     FAILED = "failed"              # Processing failed (extraction or patient match)
     SKIPPED = "skipped"            # Duplicate or irrelevant document
@@ -212,7 +213,7 @@ class PrescriptionMonitorService:
         return processed
 
     async def _process_single(self, rx: DetectedPrescription, llm):
-        """Run LLM extraction on a single prescription and create a DME order."""
+        """Run LLM extraction on a single prescription and queue for human review."""
         if not rx.raw_text:
             rx.status = RxStatus.FAILED
             rx.error = "No prescription text available for extraction"
@@ -229,33 +230,45 @@ class PrescriptionMonitorService:
             rx.error = f"LLM extraction failed: {e}"
             return
 
-        # Step 2: Build DME order from extracted data
+        equipment_list = extracted.get("equipment", [])
+        if not equipment_list:
+            rx.status = RxStatus.FAILED
+            rx.error = "No equipment found in prescription"
+            return
+
+        # Stop at REVIEW — human must approve before DME order creation
+        rx.status = RxStatus.REVIEW
+        await _save_rx(rx)
+        logger.info(f"Prescription {rx.id} queued for review ({equipment_list[0].get('category', 'Unknown')})")
+
+    async def approve_prescription(self, doc_id: str) -> DetectedPrescription:
+        """Approve a reviewed prescription and create the DME order."""
+        rx = await self.get_prescription(doc_id)
+        if not rx:
+            raise ValueError(f"Prescription {doc_id} not found")
+        if rx.status != RxStatus.REVIEW:
+            raise ValueError(f"Prescription {doc_id} is not in review status (current: {rx.status.value})")
+        if not rx.extracted_data:
+            raise ValueError(f"Prescription {doc_id} has no extracted data")
+
+        extracted = rx.extracted_data
         patient = extracted.get("patient", {})
         prescriber = extracted.get("prescriber", {})
         diagnosis = extracted.get("diagnosis", {})
         equipment_list = extracted.get("equipment", [])
         clinical = extracted.get("clinical", {})
 
-        if not equipment_list:
-            rx.status = RxStatus.FAILED
-            rx.error = "No equipment found in prescription"
-            return
-
-        # Use the first/primary equipment item as the order category
         primary = equipment_list[0]
         hcpcs_codes = [eq.get("hcpcs_code") for eq in equipment_list if eq.get("hcpcs_code")]
 
-        # Resolve patient ID from FHIR reference
         patient_id = rx.patient_ref.replace("Patient/", "") if rx.patient_ref else ""
 
-        # Build a description of all equipment items
         equip_desc = "; ".join(
             f"{eq.get('description', eq.get('category', 'Unknown'))}"
             + (f" ({eq['hcpcs_code']})" if eq.get("hcpcs_code") else "")
             for eq in equipment_list
         )
 
-        # Resolve patient details from FHIR if we have a patient ref
         patient_first = patient.get("first_name", "")
         patient_last = patient.get("last_name", "")
         patient_dob = patient.get("date_of_birth", "")
@@ -274,7 +287,7 @@ class PrescriptionMonitorService:
                     if t.get("system") == "phone" and not patient_phone:
                         patient_phone = t.get("value", "")
             except Exception:
-                pass  # Continue with LLM-extracted data
+                pass
 
         clinical_notes = []
         if clinical.get("ahi"):
@@ -308,8 +321,25 @@ class PrescriptionMonitorService:
         order = await self._dme.create_order(order_data)
         rx.dme_order_id = order.id
         rx.status = RxStatus.ORDER_CREATED
+        rx.processed_at = datetime.now().isoformat()
         await _save_rx(rx)
-        logger.info(f"Created DME order {order.id} from prescription {rx.id} ({primary.get('category')})")
+        logger.info(f"Approved prescription {rx.id} -> DME order {order.id}")
+        return rx
+
+    async def reject_prescription(self, doc_id: str, reason: str = "") -> DetectedPrescription:
+        """Reject a reviewed prescription — no DME order will be created."""
+        rx = await self.get_prescription(doc_id)
+        if not rx:
+            raise ValueError(f"Prescription {doc_id} not found")
+        if rx.status != RxStatus.REVIEW:
+            raise ValueError(f"Prescription {doc_id} is not in review status (current: {rx.status.value})")
+
+        rx.status = RxStatus.SKIPPED
+        rx.error = reason or "Rejected during review"
+        rx.processed_at = datetime.now().isoformat()
+        await _save_rx(rx)
+        logger.info(f"Rejected prescription {rx.id}: {reason}")
+        return rx
 
     async def poll_and_process(self) -> Dict:
         """Combined poll + process — convenience method for the API endpoint."""
@@ -409,4 +439,5 @@ class PrescriptionMonitorService:
             "detected_at": rx.detected_at,
             "processed_at": rx.processed_at,
             "extracted_data": rx.extracted_data,
+            "confidence": rx.extracted_data.get("confidence", 0.0) if rx.extracted_data else None,
         }

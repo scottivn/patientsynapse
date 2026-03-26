@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   DollarSign, RefreshCw, Upload, Search, Filter, Edit3, Save, X,
-  ChevronDown, ChevronUp, Trash2, Plus, AlertTriangle, Check,
+  ChevronDown, ChevronUp, Trash2, Plus, AlertTriangle, Check, Package,
 } from 'lucide-react'
 import {
   getAllowableRates, getRatePayers, importAllowableRates,
-  createAllowableRate, deleteAllowableRate,
+  createAllowableRate, deleteAllowableRate, getBundlePricing,
 } from '../services/api'
 
 const HCPCS_CODES = [
@@ -173,6 +173,9 @@ export default function AllowableRates() {
         </div>
       )}
 
+      {/* Bundle Pricing Calculator */}
+      <BundleCalculator payers={payers} />
+
       {view === 'editor' ? (
         <RateCardEditor
           initialPayer={editorPayer}
@@ -242,6 +245,212 @@ export default function AllowableRates() {
             </div>
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+
+// ── Bundle Pricing Calculator ────────────────────────────────────
+
+function BundleCalculator({ payers }) {
+  const [open, setOpen] = useState(false)
+  const [payer, setPayer] = useState('')
+  const [supplyMonths, setSupplyMonths] = useState(6)
+  const [selectedCodes, setSelectedCodes] = useState([])
+  const [result, setResult] = useState(null)
+  const [calculating, setCalculating] = useState(false)
+  const [calcError, setCalcError] = useState(null)
+
+  const toggleCode = (code) => {
+    setSelectedCodes(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    )
+    setResult(null)
+  }
+
+  const selectPreset = (preset) => {
+    setSelectedCodes(preset)
+    setResult(null)
+  }
+
+  const calculate = async () => {
+    if (!payer || selectedCodes.length === 0) return
+    setCalculating(true)
+    setCalcError(null)
+    try {
+      setResult(await getBundlePricing(payer, selectedCodes, supplyMonths))
+    } catch (e) {
+      setCalcError(e.message)
+    } finally {
+      setCalculating(false)
+    }
+  }
+
+  const PRESETS = [
+    { label: 'New CPAP Setup', codes: ['E0601', 'A7030', 'A7035', 'A4604', 'A7046', 'A7038', 'A7039'] },
+    { label: 'New BiPAP Setup', codes: ['E0470', 'A7030', 'A7035', 'A4604', 'A7046', 'A7038', 'A7039'] },
+    { label: 'Quarterly Resupply (Full Face)', codes: ['A7031', 'A7038', 'A7039'] },
+    { label: 'Quarterly Resupply (Nasal)', codes: ['A7032', 'A7038', 'A7039'] },
+    { label: 'Biannual Resupply', codes: ['A7030', 'A7035', 'A4604', 'A7046', 'A7038', 'A7039'] },
+  ]
+
+  const payerNames = [...new Set(payers.map(p => p.payer))].sort()
+
+  return (
+    <div className="card">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-between w-full"
+      >
+        <div className="flex items-center gap-2">
+          <Package size={16} className="text-indigo-500" />
+          <h2 className="text-sm font-semibold text-gray-900">Bundle Pricing Calculator</h2>
+          <span className="text-xs text-gray-400">Calculate total reimbursement for multi-item orders</span>
+        </div>
+        {open ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-4">
+          {/* Payer + supply period */}
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Payer</label>
+              <select
+                value={payer}
+                onChange={(e) => { setPayer(e.target.value); setResult(null) }}
+                className="input text-sm w-48"
+              >
+                <option value="">— Select payer —</option>
+                {payerNames.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Supply Period</label>
+              <select
+                value={supplyMonths}
+                onChange={(e) => { setSupplyMonths(parseInt(e.target.value)); setResult(null) }}
+                className="input text-sm w-32"
+              >
+                <option value={3}>3 months</option>
+                <option value={6}>6 months</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Quick presets */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1.5">Quick Presets</label>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => selectPreset(p.codes)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    JSON.stringify(selectedCodes.sort()) === JSON.stringify([...p.codes].sort())
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                      : 'border-gray-200 text-gray-600 hover:border-indigo-200 hover:text-indigo-600'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* HCPCS code checkboxes grouped by category */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1.5">Select Items</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5">
+              {Object.entries(CATEGORY_LABELS).map(([cat, label]) => (
+                <div key={cat}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mt-2 mb-1">{label}</p>
+                  {HCPCS_CODES.filter(h => h.category === cat).map(h => (
+                    <label key={h.code} className="flex items-center gap-2 py-0.5 text-sm cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1">
+                      <input
+                        type="checkbox"
+                        checked={selectedCodes.includes(h.code)}
+                        onChange={() => toggleCode(h.code)}
+                        className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-400"
+                      />
+                      <span className="font-mono text-xs text-gray-500 w-14">{h.code}</span>
+                      <span className="text-gray-700">{h.label}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Calculate button */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={calculate}
+              disabled={calculating || !payer || selectedCodes.length === 0}
+              className="btn-primary text-sm flex items-center gap-1.5"
+            >
+              {calculating ? <RefreshCw size={14} className="animate-spin" /> : <DollarSign size={14} />}
+              {calculating ? 'Calculating...' : `Calculate ${selectedCodes.length} item${selectedCodes.length !== 1 ? 's' : ''}`}
+            </button>
+            {selectedCodes.length > 0 && (
+              <button onClick={() => { setSelectedCodes([]); setResult(null) }} className="text-xs text-gray-400 hover:text-gray-600">
+                Clear selection
+              </button>
+            )}
+          </div>
+
+          {calcError && (
+            <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{calcError}</div>
+          )}
+
+          {/* Results */}
+          {result && (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-900">
+                  {result.payer} — {result.supply_months}-month supply
+                </span>
+                {!result.complete && (
+                  <span className="text-xs bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <AlertTriangle size={10} /> Some rates missing
+                  </span>
+                )}
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-400 uppercase tracking-wider border-b">
+                    <th className="px-4 py-2 font-medium">HCPCS</th>
+                    <th className="px-4 py-2 font-medium">Description</th>
+                    <th className="px-4 py-2 font-medium text-right">Allowed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.items?.map((item, i) => (
+                    <tr key={i} className={`border-b border-gray-50 ${!item.found ? 'opacity-50' : ''}`}>
+                      <td className="px-4 py-2 font-mono text-xs font-medium text-gray-600">{item.hcpcs_code}</td>
+                      <td className="px-4 py-2 text-gray-700">
+                        {item.description || HCPCS_LABELS[item.hcpcs_code] || '—'}
+                        {!item.found && <span className="text-xs text-yellow-600 ml-2">(no rate found)</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono font-medium text-gray-900">
+                        {item.found ? `$${item.allowed_amount.toFixed(2)}` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-indigo-50">
+                    <td colSpan={2} className="px-4 py-2.5 font-semibold text-indigo-900">Total Allowed Amount</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-bold text-lg text-indigo-700">
+                      ${result.total?.toFixed(2)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

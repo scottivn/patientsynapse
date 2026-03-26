@@ -148,6 +148,12 @@ async def test_rcm_dashboard(client, admin_cookies):
     assert "referrals_processed" in data
     assert "payer_mix" in data
     assert "top_diagnoses" in data
+    assert "revenue" in data
+    assert "ar_aging" in data
+    assert "claims" in data
+    assert "denial_reasons" in data
+    assert "revenue_by_payer" in data
+    assert "monthly_trend" in data
 
 
 @pytest.mark.asyncio

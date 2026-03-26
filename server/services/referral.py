@@ -181,7 +181,7 @@ class ReferralService:
             # Step 1: Classify the document
             logger.info(f"[{ref_id}] Classifying document {filename}")
             doc_type = await self.llm.classify_document(fax_text)
-            valid_types = ("referral", "lab_result", "insurance_auth", "medical_records", "other")
+            valid_types = ("referral", "labs_imaging", "insurance_auth", "medical_records", "medication_prior_auth", "dme", "sleep_study_results", "other")
             record.document_type = doc_type if doc_type in valid_types else "other"
             logger.info(f"[{ref_id}] Classified as: {record.document_type}")
 
@@ -339,6 +339,7 @@ class ReferralService:
             diagnosis_codes=r.get("diagnosis_codes", []),
             urgency=r.get("urgency", "routine"),
             notes=r.get("notes"),
+            confidence=float(raw.get("confidence", 0.0)),
         )
 
     async def get_referral(self, ref_id: str) -> Optional[ReferralRecord]:
