@@ -190,6 +190,50 @@ async def init_all_tables():
             "CREATE INDEX IF NOT EXISTS idx_rx_status ON prescriptions(status)"
         )
 
+        # ── DME Product Catalog ───────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dme_products (
+                id TEXT PRIMARY KEY,
+                hcpcs_code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                subcategory TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                resupply_months INTEGER,
+                resupply_qty INTEGER NOT NULL DEFAULT 1,
+                has_sizes INTEGER NOT NULL DEFAULT 0,
+                available_sizes TEXT NOT NULL DEFAULT '[]',
+                vendors TEXT NOT NULL DEFAULT '["In-House","PPM","VGM"]',
+                device_types TEXT NOT NULL DEFAULT '[]',
+                is_machine INTEGER NOT NULL DEFAULT 0,
+                is_accessory INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 100
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_product_hcpcs ON dme_products(hcpcs_code)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_product_category ON dme_products(category)"
+        )
+
+        # ── In-House Inventory ────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS dme_inventory (
+                id TEXT PRIMARY KEY,
+                product_id TEXT NOT NULL REFERENCES dme_products(id),
+                size TEXT NOT NULL DEFAULT '',
+                quantity INTEGER NOT NULL DEFAULT 0,
+                reorder_point INTEGER NOT NULL DEFAULT 2,
+                last_restocked TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_product_size ON dme_inventory(product_id, size)"
+        )
+
         # ── Fax processing tracker ─────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS fax_processed (

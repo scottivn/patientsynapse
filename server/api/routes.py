@@ -373,15 +373,26 @@ async def auth_login():
 
 
 @router.get("/auth/callback", tags=["SMART on FHIR"], dependencies=[Depends(require_admin)])
-async def auth_callback(code: str, state: Optional[str] = None):
+async def auth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
     """Handle OAuth callback with authorization code (3-legged)."""
+    # eCW may redirect with error params instead of a code
+    if error:
+        logger.error(f"OAuth error from EMR: {error} — {error_description}")
+        return {"status": "error", "error": error, "error_description": error_description}
+    if not code:
+        raise HTTPException(400, "No authorization code received from EMR.")
     auth = get_smart_auth()
     try:
         token = await auth.exchange_code(code)
         return {"status": "authenticated", "emr": get_emr().name, "scope": token.scope}
     except Exception as e:
         logger.error(f"Token exchange failed: {e}")
-        raise HTTPException(400, "Token exchange failed. Check server logs.")
+        raise HTTPException(400, f"Token exchange failed: {e}")
 
 
 @router.post("/auth/connect-service", tags=["SMART on FHIR"], dependencies=[Depends(require_admin)])
@@ -1125,6 +1136,100 @@ async def dme_equipment_categories():
         "bundles": SUPPLY_BUNDLES,
         "hcpcs_map": CATEGORY_HCPCS_MAP,
     }
+
+
+@router.get("/dme/products", tags=["DME Reference Data"])
+async def dme_products(category: Optional[str] = None):
+    """Return the DME product catalog, optionally filtered by category."""
+    from server.services.dme_products import get_all_products, get_products_by_category
+    if category:
+        return {"products": await get_products_by_category(category)}
+    return {"products": await get_all_products()}
+
+
+@router.get("/dme/products/categories", tags=["DME Reference Data"])
+async def dme_product_categories():
+    """Return distinct product categories."""
+    from server.services.dme_products import get_product_categories
+    return {"categories": await get_product_categories()}
+
+
+@router.get("/dme/products/{product_id}", tags=["DME Reference Data"])
+async def dme_product_detail(product_id: str):
+    """Return a single product by ID."""
+    from server.services.dme_products import get_product
+    product = await get_product(product_id)
+    if not product:
+        raise HTTPException(404, "Product not found")
+    return product
+
+
+@router.get("/dme/vendors", tags=["DME Reference Data"])
+async def dme_vendors():
+    """Return vendor options with portal info."""
+    from server.services.dme_products import get_all_vendors
+    return {"vendors": get_all_vendors()}
+
+
+# ── In-House Inventory ───────────────────────────────────────────────
+
+@router.get("/dme/inventory", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_inventory():
+    """Return full in-house inventory with product details."""
+    from server.services.dme_products import get_inventory, get_inventory_summary
+    return {
+        "items": await get_inventory(),
+        "summary": await get_inventory_summary(),
+    }
+
+
+@router.get("/dme/inventory/low-stock", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_low_stock():
+    """Return items at or below reorder point."""
+    from server.services.dme_products import get_low_stock_items
+    return {"items": await get_low_stock_items()}
+
+
+@router.put("/dme/inventory/{inventory_id}", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_update_inventory(inventory_id: str, body: dict):
+    """Set inventory quantity and/or reorder point."""
+    from server.services.dme_products import update_inventory
+    quantity = body.get("quantity")
+    reorder_point = body.get("reorder_point")
+    if quantity is None:
+        raise HTTPException(400, "quantity is required")
+    if quantity < 0:
+        raise HTTPException(400, "quantity cannot be negative")
+    result = await update_inventory(inventory_id, quantity, reorder_point)
+    if not result:
+        raise HTTPException(404, "Inventory item not found")
+    return dict(result)
+
+
+@router.post("/dme/inventory/{inventory_id}/adjust", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_adjust_inventory(inventory_id: str, body: dict):
+    """Increment or decrement stock. Use positive delta to add, negative to remove."""
+    from server.services.dme_products import adjust_inventory
+    delta = body.get("delta")
+    if delta is None or not isinstance(delta, int):
+        raise HTTPException(400, "delta (integer) is required")
+    result = await adjust_inventory(inventory_id, delta)
+    if not result:
+        raise HTTPException(404, "Inventory item not found")
+    return dict(result)
+
+
+@router.post("/dme/inventory/{inventory_id}/restock", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_restock_inventory(inventory_id: str, body: dict):
+    """Add stock and record restock date."""
+    from server.services.dme_products import restock_inventory
+    quantity = body.get("quantity")
+    if not quantity or quantity <= 0:
+        raise HTTPException(400, "quantity must be positive")
+    result = await restock_inventory(inventory_id, quantity)
+    if not result:
+        raise HTTPException(404, "Inventory item not found")
+    return dict(result)
 
 
 @router.get("/dme/dashboard", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])

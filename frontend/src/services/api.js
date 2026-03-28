@@ -215,6 +215,16 @@ export const getDMEPatientConfirmed = () => request('/dme/orders/patient-confirm
 export const getDMEOnHold = () => request('/dme/orders/on-hold');
 export const getDMEEquipmentCategories = () => request('/dme/equipment-categories');
 
+// DME product catalog & inventory
+export const getDMEProducts = (category) => request(category ? `/dme/products?category=${encodeURIComponent(category)}` : '/dme/products');
+export const getDMEProductCategories = () => request('/dme/products/categories');
+export const getDMEVendors = () => request('/dme/vendors');
+export const getDMEInventory = () => request('/dme/inventory');
+export const getDMELowStock = () => request('/dme/inventory/low-stock');
+export const updateDMEInventory = (id, data) => request(`/dme/inventory/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const adjustDMEInventory = (id, delta) => request(`/dme/inventory/${id}/adjust`, { method: 'POST', body: JSON.stringify({ delta }) });
+export const restockDMEInventory = (id, quantity) => request(`/dme/inventory/${id}/restock`, { method: 'POST', body: JSON.stringify({ quantity }) });
+
 // DME admin — patient search and order creation
 export const searchDMEPatients = (params) => {
   const qs = new URLSearchParams(params).toString();

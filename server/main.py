@@ -63,6 +63,10 @@ async def lifespan(app: FastAPI):
     from server.services.allowable_rates import init_rates_table
     await init_rates_table()
 
+    from server.services.dme_products import seed_products, seed_inventory
+    await seed_products()
+    await seed_inventory()
+
     # Initialize referral + fax ingestion services (work without OAuth for LLM-only features)
     auth = SMARTAuth(emr)
     set_smart_auth(auth)

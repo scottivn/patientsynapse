@@ -4,9 +4,10 @@ import {
   ChevronDown, ChevronUp, AlertTriangle, Send, Copy, ExternalLink,
   Inbox, Clock, Activity, FileText, Truck, Store,
   PauseCircle, Play, UserCheck, ShoppingCart, Archive, CalendarClock,
-  Pill, Search, Plus, X, Cpu, User,
+  Pill, Search, Plus, X, Cpu, User, Warehouse,
 } from 'lucide-react'
 import ErrorBanner from '../components/ErrorBanner'
+import DMEInventory from '../components/DMEInventory'
 import {
   listDMEOrders, getDMEDashboard,
   getDMEIncoming, getDMEInProgress,
@@ -18,6 +19,7 @@ import {
   getDMEExpiringEncounters, processDMEAutoDeliveries,
   getDMEReceipt, getDMEDeliveryTicket,
   searchDMEPatients, createAdminDMEOrder,
+  getDMEProducts, getDMEProductCategories, getDMEVendors,
 } from '../services/api'
 
 const STATUS_STYLES = {
@@ -611,6 +613,17 @@ function OrderRow({ order, onAction }) {
                 </button>
               )}
 
+              {/* View patient link — patient_contacted (token already generated) */}
+              {order.status === 'patient_contacted' && order.confirmation_token && (
+                <button onClick={() => {
+                  setConfirmationUrl(`${window.location.origin}/dme/confirm/${order.confirmation_token}`)
+                  setModal('link')
+                }}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-cyan-300 text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5">
+                  <ExternalLink size={13} /> Patient Link
+                </button>
+              )}
+
               {/* Order from vendor — patient_confirmed */}
               {order.status === 'patient_confirmed' && (
                 <button disabled={busy} onClick={() => setModal('vendor')}
@@ -693,22 +706,7 @@ function OrderRow({ order, onAction }) {
 }
 
 
-// ── Equipment constants (mirrors server/services/dme.py) ─────────
-
-const EQUIPMENT_CATEGORIES = [
-  "CPAP Machine", "BiPAP / ASV Machine",
-  "CPAP Mask — Full Face", "CPAP Mask — Nasal", "CPAP Mask — Nasal Pillow",
-  "Mask Cushion / Pillow Replacement", "Headgear",
-  "Heated Tubing", "Standard Tubing", "Water Chamber / Humidifier",
-  "Filters — Disposable", "Filters — Non-Disposable",
-  "Chinstrap", "CPAP Travel Case", "CPAP Cleaning Supplies",
-  "Oral Appliance (MAD)", "Positional Therapy Device", "Other Sleep DME",
-]
-
-const BUNDLE_OPTIONS = [
-  "Full Resupply (Full Face)", "Full Resupply (Nasal)", "Full Resupply (Nasal Pillow)",
-  "Cushion + Filters Only", "Tubing + Chamber",
-]
+// ── Equipment constants ──────────────────────────────────────────
 
 const REFILL_FREQUENCIES = [
   { value: 'monthly', label: 'Monthly' },
@@ -716,6 +714,89 @@ const REFILL_FREQUENCIES = [
   { value: 'biannual', label: 'Every 6 months' },
   { value: 'annual', label: 'Annual' },
 ]
+
+const VENDOR_PORTALS = {
+  PPM: 'https://dev.ppmfulfillment.com/Login.aspx',
+  VGM: 'https://www.vgm.com/login/?returnURL=%2fportal%2f',
+}
+
+
+// ── Product Selection (shared between patient and newPatient steps) ──
+
+function ProductSelector({ form, setForm, products, categories }) {
+  const selectedProduct = products.find(p => p.id === form.product_id)
+  const categoryProducts = form.equipment_category
+    ? products.filter(p => p.category === form.equipment_category)
+    : []
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs font-medium text-gray-600">Category</label>
+        <select value={form.equipment_category} onChange={e => setForm(f => ({
+          ...f, equipment_category: e.target.value, product_id: '', size: '', equipment_description: '',
+        }))} className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+          <option value="">Select category...</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {form.equipment_category && (
+        <div>
+          <label className="text-xs font-medium text-gray-600">Product</label>
+          <select value={form.product_id || ''} onChange={e => {
+            const prod = products.find(p => p.id === e.target.value)
+            setForm(f => ({
+              ...f,
+              product_id: e.target.value,
+              equipment_description: prod ? `${prod.name} (${prod.hcpcs_code})` : '',
+              size: '',
+            }))
+          }} className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+            <option value="">Select product...</option>
+            {categoryProducts.map(p => (
+              <option key={p.id} value={p.id}>{p.name} — {p.hcpcs_code}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {selectedProduct?.has_sizes && selectedProduct.available_sizes?.length > 0 && (
+        <div>
+          <label className="text-xs font-medium text-gray-600">Size</label>
+          <select value={form.size || ''} onChange={e => setForm(f => ({ ...f, size: e.target.value }))}
+            className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+            <option value="">Select size...</option>
+            {selectedProduct.available_sizes.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      )}
+
+      {selectedProduct && (
+        <div className="text-xs bg-gray-50 border rounded-lg p-2.5 space-y-1">
+          <p className="text-gray-500">{selectedProduct.description}</p>
+          <p className="text-gray-400">
+            HCPCS: <span className="font-mono">{selectedProduct.hcpcs_code}</span>
+            {selectedProduct.resupply_months && <> · Resupply: every {selectedProduct.resupply_months} mo</>}
+          </p>
+          {selectedProduct.vendors?.length > 0 && (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-gray-400">Order via:</span>
+              {selectedProduct.vendors.map(v => VENDOR_PORTALS[v] ? (
+                <a key={v} href={VENDOR_PORTALS[v]} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium">
+                  {v} <ExternalLink size={10} />
+                </a>
+              ) : (
+                <span key={v} className="text-gray-600 font-medium">{v}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 
 // ── New Order Slide-Over Panel ──────────────────────────────────
@@ -729,11 +810,22 @@ function NewOrderPanel({ open, onClose, onCreated }) {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState(null)
+  const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
   const [form, setForm] = useState({
-    equipment_category: '', equipment_description: '', quantity: 1,
+    equipment_category: '', equipment_description: '', product_id: '', size: '', quantity: 1,
     diagnosis_code: '', diagnosis_description: '', referring_physician: '', referring_npi: '',
     clinical_notes: '', auto_replace: false, auto_replace_frequency: 'quarterly',
   })
+
+  // Load product catalog when panel opens
+  useEffect(() => {
+    if (open && products.length === 0) {
+      Promise.all([getDMEProducts(), getDMEProductCategories()])
+        .then(([prods, cats]) => { setProducts(prods); setCategories(cats) })
+        .catch(() => {})
+    }
+  }, [open, products.length])
   // New patient fields (when creating from scratch)
   const [newPatient, setNewPatient] = useState({
     first_name: '', last_name: '', dob: '', phone: '', email: '',
@@ -747,7 +839,7 @@ function NewOrderPanel({ open, onClose, onCreated }) {
     setSelectedPatient(null)
     setError(null)
     setSearchFields({ family: '', given: '', dob: '', mrn: '' })
-    setForm({ equipment_category: '', equipment_description: '', quantity: 1,
+    setForm({ equipment_category: '', equipment_description: '', product_id: '', size: '', quantity: 1,
       diagnosis_code: '', diagnosis_description: '', referring_physician: '', referring_npi: '',
       clinical_notes: '', auto_replace: false, auto_replace_frequency: 'quarterly' })
     setNewPatient({ first_name: '', last_name: '', dob: '', phone: '', email: '',
@@ -1000,23 +1092,7 @@ function NewOrderPanel({ open, onClose, onCreated }) {
               <div className="border-t pt-4 space-y-3">
                 <h4 className="text-sm font-semibold text-gray-900">Create Order</h4>
 
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Equipment Category</label>
-                  <select value={form.equipment_category} onChange={e => setForm(f => ({ ...f, equipment_category: e.target.value }))}
-                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
-                    <option value="">Select category...</option>
-                    {EQUIPMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Description / Bundle</label>
-                  <select value={form.equipment_description} onChange={e => setForm(f => ({ ...f, equipment_description: e.target.value }))}
-                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
-                    <option value="">Select bundle or enter custom...</option>
-                    {BUNDLE_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                </div>
+                <ProductSelector form={form} setForm={setForm} products={products} categories={categories} />
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1151,22 +1227,7 @@ function NewOrderPanel({ open, onClose, onCreated }) {
               {/* Same order form as the patient step */}
               <div className="border-t pt-4 space-y-3">
                 <h4 className="text-sm font-semibold text-gray-900">Order Details</h4>
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Equipment Category</label>
-                  <select value={form.equipment_category} onChange={e => setForm(f => ({ ...f, equipment_category: e.target.value }))}
-                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
-                    <option value="">Select category...</option>
-                    {EQUIPMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Description / Bundle</label>
-                  <select value={form.equipment_description} onChange={e => setForm(f => ({ ...f, equipment_description: e.target.value }))}
-                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
-                    <option value="">Select bundle or enter custom...</option>
-                    {BUNDLE_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                </div>
+                <ProductSelector form={form} setForm={setForm} products={products} categories={categories} />
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={form.auto_replace}
@@ -1327,10 +1388,21 @@ export default function DMEAdmin() {
             {rxScanning ? <RefreshCw size={14} className="animate-spin" /> : <Pill size={14} />}
             {rxScanning ? 'Scanning eCW...' : 'Scan for Rx'}
           </button>
-          <button onClick={() => setActiveView(activeView === 'pipeline' ? 'all_orders' : 'pipeline')}
-            className="btn-secondary text-sm">
-            {activeView === 'pipeline' ? 'All Orders' : 'Pipeline'}
-          </button>
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+            {[
+              { key: 'pipeline', label: 'Pipeline' },
+              { key: 'all_orders', label: 'All Orders' },
+              { key: 'inventory', label: 'Inventory', icon: Warehouse },
+            ].map(v => (
+              <button key={v.key} onClick={() => setActiveView(v.key)}
+                className={`px-3 py-1.5 font-medium flex items-center gap-1.5 transition-colors ${
+                  activeView === v.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}>
+                {v.icon && <v.icon size={13} />}
+                {v.label}
+              </button>
+            ))}
+          </div>
           <button onClick={load} disabled={loading} className="btn-secondary text-sm flex items-center gap-2">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
@@ -1422,7 +1494,9 @@ export default function DMEAdmin() {
         </div>
       )}
 
-      {loading ? (
+      {activeView === 'inventory' ? (
+        <DMEInventory />
+      ) : loading ? (
         <p className="text-gray-400 text-center py-12">Loading...</p>
       ) : activeView === 'pipeline' ? (
         <div className="space-y-8">

@@ -21,18 +21,20 @@ class Settings(BaseSettings):
     # Athena-specific settings (used when emr_provider=athena)
     # Set ATHENA_SANDBOX=true to point at preview.platform.athenahealth.com instead of production
     athena_sandbox: bool = Field(default=False)
-    athena_fhir_base_url: str = Field(default="https://api.platform.athenahealth.com/fhir/r4")
+    athena_fhir_base_url: str = Field(default="https://api.platform.athenahealth.com")
     athena_client_id: str = Field(default="")
     athena_client_secret: str = Field(default="")
     athena_authorize_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/authorize")
     athena_token_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/token")
     athena_practice_id: str = Field(default="")
+    athena_brand_id: str = Field(default="1")
+    athena_csg_id: str = Field(default="1")
 
     @property
     def athena_effective_fhir_base_url(self) -> str:
-        if self.athena_sandbox:
-            return "https://api.preview.platform.athenahealth.com/fhir/r4"
-        return self.athena_fhir_base_url
+        # Athena FHIR R4 base — practice routing via ah-practice search param
+        base = "https://api.preview.platform.athenahealth.com" if self.athena_sandbox else self.athena_fhir_base_url
+        return f"{base}/fhir/r4"
 
     @property
     def athena_effective_token_url(self) -> str:
@@ -59,7 +61,7 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-20250514"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
-    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-6-20250929-v1:0"
     bedrock_region: str = "us-east-1"
 
     # App

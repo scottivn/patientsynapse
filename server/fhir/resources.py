@@ -16,14 +16,20 @@ class PatientResource:
     async def search_by_name_dob(
         self, family: str, given: str, birthdate: str = ""
     ) -> List[models.Patient]:
-        """Search for patient by name and DOB. Returns match candidates."""
+        """Search for patient by name and DOB. Returns match candidates.
+        Uses 'name' param when only family is provided (Athena requires
+        family to be paired with given, birthdate, or gender)."""
         params = {}
-        if family:
+        if family and (given or birthdate):
             params["family"] = family
-        if given:
-            params["given"] = given
-        if birthdate:
-            params["birthdate"] = birthdate
+            if given:
+                params["given"] = given
+            if birthdate:
+                params["birthdate"] = birthdate
+        elif family:
+            params["name"] = family
+        elif given:
+            params["name"] = given
         bundle = await self.client.search("Patient", params)
         return [
             models.Patient(**entry["resource"])

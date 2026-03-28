@@ -18,6 +18,7 @@ passlib[bcrypt]>=1.7.4
 aiosqlite>=0.20.0
 
 # LLM providers (grok uses httpx directly)
+boto3>=1.35.0               # AWS Bedrock (HIPAA-eligible)
 # openai>=1.50.0          # Uncomment when using OpenAI
 # anthropic>=0.39.0       # Uncomment when using Anthropic
 
