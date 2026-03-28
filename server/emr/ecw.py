@@ -40,11 +40,9 @@ class ECWProvider(EMRProvider):
 
     @property
     def scopes(self) -> list[str]:
+        # Read scopes — matches eCW sandbox configuration.
+        # Write scopes and offline_access require production contract.
         return [
-            "openid",
-            "fhirUser",
-            "offline_access",
-            # Read
             "user/Patient.read",
             "user/Condition.read",
             "user/Coverage.read",
@@ -57,7 +55,16 @@ class ECWProvider(EMRProvider):
             "user/Organization.read",
             "user/Procedure.read",
             "user/Provenance.read",
-            # Write
+            "user/Device.read",
+        ]
+
+    @property
+    def production_scopes(self) -> list[str]:
+        """Full scope set for production (after contract is signed)."""
+        return self.scopes + [
+            "openid",
+            "fhirUser",
+            "offline_access",
             "user/Patient.write",
             "user/Condition.write",
             "user/DocumentReference.write",
@@ -81,7 +88,7 @@ class ECWProvider(EMRProvider):
             "Patient", "Condition", "Coverage", "Encounter",
             "DocumentReference", "ServiceRequest", "Practitioner",
             "PractitionerRole", "Location", "Organization",
-            "Procedure", "Provenance", "Task", "Communication",
+            "Procedure", "Provenance", "Device", "Task", "Communication",
         ]
 
     @property

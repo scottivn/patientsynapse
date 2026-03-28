@@ -2,14 +2,14 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   Package, RefreshCw, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, AlertTriangle, Send, Copy, ExternalLink,
-  Inbox, Clock, RotateCcw, Activity, FileText, Truck, Store,
+  Inbox, Clock, Activity, FileText, Truck, Store,
   PauseCircle, Play, UserCheck, ShoppingCart, Archive, CalendarClock,
-  Pill, Search,
+  Pill, Search, Plus, X, Cpu, User,
 } from 'lucide-react'
 import ErrorBanner from '../components/ErrorBanner'
 import {
-  listDMEOrders, getDMEDashboard, getDMEAutoReplaceDue,
-  getDMEIncoming, getDMEAutoRefillPending, getDMEInProgress,
+  listDMEOrders, getDMEDashboard,
+  getDMEIncoming, getDMEInProgress,
   getDMEAwaitingPatient, getDMEPatientConfirmed, getDMEOnHold,
   verifyDMEInsurance, approveDMEOrder, rejectDMEOrder, fulfillDMEOrder,
   updateDMECompliance, holdDMEOrder, resumeDMEOrder,
@@ -17,6 +17,7 @@ import {
   pollPrescriptions, listPrescriptions,
   getDMEExpiringEncounters, processDMEAutoDeliveries,
   getDMEReceipt, getDMEDeliveryTicket,
+  searchDMEPatients, createAdminDMEOrder,
 } from '../services/api'
 
 const STATUS_STYLES = {
@@ -692,11 +693,521 @@ function OrderRow({ order, onAction }) {
 }
 
 
+// ── Equipment constants (mirrors server/services/dme.py) ─────────
+
+const EQUIPMENT_CATEGORIES = [
+  "CPAP Machine", "BiPAP / ASV Machine",
+  "CPAP Mask — Full Face", "CPAP Mask — Nasal", "CPAP Mask — Nasal Pillow",
+  "Mask Cushion / Pillow Replacement", "Headgear",
+  "Heated Tubing", "Standard Tubing", "Water Chamber / Humidifier",
+  "Filters — Disposable", "Filters — Non-Disposable",
+  "Chinstrap", "CPAP Travel Case", "CPAP Cleaning Supplies",
+  "Oral Appliance (MAD)", "Positional Therapy Device", "Other Sleep DME",
+]
+
+const BUNDLE_OPTIONS = [
+  "Full Resupply (Full Face)", "Full Resupply (Nasal)", "Full Resupply (Nasal Pillow)",
+  "Cushion + Filters Only", "Tubing + Chamber",
+]
+
+const REFILL_FREQUENCIES = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly (90 days)' },
+  { value: 'biannual', label: 'Every 6 months' },
+  { value: 'annual', label: 'Annual' },
+]
+
+
+// ── New Order Slide-Over Panel ──────────────────────────────────
+
+function NewOrderPanel({ open, onClose, onCreated }) {
+  const [step, setStep] = useState('search') // search | patient | form | newPatient
+  const [searchMode, setSearchMode] = useState('name') // name | mrn
+  const [searchFields, setSearchFields] = useState({ family: '', given: '', dob: '', mrn: '' })
+  const [searching, setSearching] = useState(false)
+  const [results, setResults] = useState(null)
+  const [selectedPatient, setSelectedPatient] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState(null)
+  const [form, setForm] = useState({
+    equipment_category: '', equipment_description: '', quantity: 1,
+    diagnosis_code: '', diagnosis_description: '', referring_physician: '', referring_npi: '',
+    clinical_notes: '', auto_replace: false, auto_replace_frequency: 'quarterly',
+  })
+  // New patient fields (when creating from scratch)
+  const [newPatient, setNewPatient] = useState({
+    first_name: '', last_name: '', dob: '', phone: '', email: '',
+    address: '', city: '', state: '', zip: '',
+    insurance_payer: '', insurance_member_id: '', insurance_group: '',
+  })
+
+  const resetPanel = () => {
+    setStep('search')
+    setResults(null)
+    setSelectedPatient(null)
+    setError(null)
+    setSearchFields({ family: '', given: '', dob: '', mrn: '' })
+    setForm({ equipment_category: '', equipment_description: '', quantity: 1,
+      diagnosis_code: '', diagnosis_description: '', referring_physician: '', referring_npi: '',
+      clinical_notes: '', auto_replace: false, auto_replace_frequency: 'quarterly' })
+    setNewPatient({ first_name: '', last_name: '', dob: '', phone: '', email: '',
+      address: '', city: '', state: '', zip: '',
+      insurance_payer: '', insurance_member_id: '', insurance_group: '' })
+  }
+
+  const handleSearch = async () => {
+    setSearching(true)
+    setError(null)
+    try {
+      const params = searchMode === 'mrn'
+        ? { mrn: searchFields.mrn }
+        : { family: searchFields.family, given: searchFields.given, dob: searchFields.dob }
+      const data = await searchDMEPatients(params)
+      setResults(data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleSelectPatient = (patient) => {
+    setSelectedPatient(patient)
+    setStep('patient')
+  }
+
+  const handleSubmit = async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      const orderData = step === 'newPatient' ? {
+        patient_first_name: newPatient.first_name,
+        patient_last_name: newPatient.last_name,
+        patient_dob: newPatient.dob,
+        patient_phone: newPatient.phone,
+        patient_email: newPatient.email,
+        patient_address: newPatient.address,
+        patient_city: newPatient.city,
+        patient_state: newPatient.state,
+        patient_zip: newPatient.zip,
+        insurance_payer: newPatient.insurance_payer,
+        insurance_member_id: newPatient.insurance_member_id,
+        insurance_group: newPatient.insurance_group,
+        ...form,
+        origin: 'staff_initiated',
+      } : {
+        patient_first_name: selectedPatient.first_name,
+        patient_last_name: selectedPatient.last_name,
+        patient_dob: selectedPatient.dob,
+        patient_phone: selectedPatient.phone,
+        patient_email: selectedPatient.email || '',
+        patient_address: selectedPatient.address,
+        patient_city: selectedPatient.city,
+        patient_state: selectedPatient.state,
+        patient_zip: selectedPatient.zip,
+        patient_id: selectedPatient.patient_id,
+        insurance_payer: selectedPatient.insurance?.payer || '',
+        insurance_member_id: selectedPatient.insurance?.member_id || '',
+        insurance_group: selectedPatient.insurance?.group || '',
+        ...form,
+        origin: 'staff_initiated',
+      }
+      await createAdminDMEOrder(orderData)
+      resetPanel()
+      onClose()
+      onCreated()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={() => { resetPanel(); onClose() }} />
+
+      {/* Panel */}
+      <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b bg-gray-50">
+          <h2 className="text-lg font-bold text-gray-900">New DME Order</h2>
+          <button onClick={() => { resetPanel(); onClose() }} className="text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+
+        {error && <div className="px-5 pt-3"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {/* Step 1: Patient Search */}
+          {step === 'search' && (
+            <div className="space-y-4">
+              <div className="flex gap-2 mb-2">
+                <button onClick={() => setSearchMode('name')}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium ${searchMode === 'name' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  Name + DOB
+                </button>
+                <button onClick={() => setSearchMode('mrn')}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium ${searchMode === 'mrn' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  MRN
+                </button>
+              </div>
+
+              {searchMode === 'name' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Last Name</label>
+                    <input value={searchFields.family} onChange={e => setSearchFields(f => ({ ...f, family: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Garcia" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">First Name</label>
+                    <input value={searchFields.given} onChange={e => setSearchFields(f => ({ ...f, given: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Maria" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600">Date of Birth</label>
+                    <input type="date" value={searchFields.dob} onChange={e => setSearchFields(f => ({ ...f, dob: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-medium text-gray-600">MRN / Patient ID</label>
+                  <input value={searchFields.mrn} onChange={e => setSearchFields(f => ({ ...f, mrn: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="PT001" />
+                </div>
+              )}
+
+              <button onClick={handleSearch} disabled={searching || (searchMode === 'name' && !searchFields.family && !searchFields.given)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                {searching ? 'Searching EMR...' : 'Search Patients'}
+              </button>
+
+              {/* Results */}
+              {results && (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 font-medium">{results.length} patient{results.length !== 1 ? 's' : ''} found</p>
+                  {results.length === 0 && (
+                    <div className="text-center py-6 space-y-2">
+                      <p className="text-sm text-gray-500">No patients found in EMR</p>
+                      <button onClick={() => setStep('newPatient')} className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+                        + Create New Patient
+                      </button>
+                    </div>
+                  )}
+                  {results.map((p, i) => (
+                    <div key={i} onClick={() => handleSelectPatient(p)}
+                      className="border rounded-lg p-3 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-medium text-sm text-gray-900">{p.first_name} {p.last_name}</span>
+                          <span className="text-xs text-gray-400 ml-2">DOB: {p.dob}</span>
+                        </div>
+                        <span className="text-xs text-gray-400">ID: {p.patient_id}</span>
+                      </div>
+                      {p.insurance?.payer && (
+                        <p className="text-xs text-gray-500 mt-1">Insurance: {p.insurance.payer}</p>
+                      )}
+                      {p.devices?.length > 0 && (
+                        <p className="text-xs text-purple-600 mt-1">
+                          <Cpu size={10} className="inline mr-1" />
+                          {p.devices.map(d => `${d.manufacturer} ${d.model}`).join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {results.length > 0 && (
+                    <button onClick={() => setStep('newPatient')} className="text-xs text-blue-600 hover:text-blue-700 font-medium mt-2">
+                      Patient not listed? Create New Patient
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 2: Patient Selected — show details + create order */}
+          {step === 'patient' && selectedPatient && (
+            <div className="space-y-4">
+              <button onClick={() => setStep('search')} className="text-xs text-blue-600 hover:text-blue-700">← Back to search</button>
+
+              {/* Patient card */}
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <div className="flex items-center gap-2 mb-2">
+                  <User size={16} className="text-gray-500" />
+                  <span className="font-semibold text-gray-900">{selectedPatient.first_name} {selectedPatient.last_name}</span>
+                  <span className="text-xs text-gray-400">#{selectedPatient.patient_id}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
+                  <span>DOB: {selectedPatient.dob}</span>
+                  <span>Phone: {selectedPatient.phone || '—'}</span>
+                  <span className="col-span-2">Address: {[selectedPatient.address, selectedPatient.city, selectedPatient.state, selectedPatient.zip].filter(Boolean).join(', ') || '—'}</span>
+                </div>
+                {selectedPatient.insurance?.payer && (
+                  <div className="mt-2 text-xs">
+                    <span className="font-medium text-gray-700">Insurance: </span>
+                    <span className="text-gray-600">{selectedPatient.insurance.payer}</span>
+                    {selectedPatient.insurance.member_id && <span className="text-gray-400 ml-2">ID: {selectedPatient.insurance.member_id}</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Devices */}
+              {selectedPatient.devices?.length > 0 && (
+                <div className="border rounded-lg p-3">
+                  <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1"><Cpu size={12} /> Current Equipment</h4>
+                  <div className="space-y-1.5">
+                    {selectedPatient.devices.map((d, i) => (
+                      <div key={i} className="text-xs text-gray-600 flex items-start gap-2">
+                        <span className="text-purple-500">•</span>
+                        <div>
+                          <span className="font-medium">{d.type}</span>
+                          {d.manufacturer && <span className="text-gray-400"> — {d.manufacturer} {d.model}</span>}
+                          {d.notes && <p className="text-gray-400 mt-0.5">{d.notes}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent orders */}
+              {selectedPatient.recent_orders?.length > 0 && (
+                <div className="border rounded-lg p-3">
+                  <h4 className="text-xs font-semibold text-gray-700 mb-2">Recent DME Orders</h4>
+                  <div className="space-y-1">
+                    {selectedPatient.recent_orders.slice(0, 5).map(o => (
+                      <div key={o.id} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600">#{o.id} — {o.equipment_description || o.equipment_category}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          o.status === 'fulfilled' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'
+                        }`}>{o.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Order form */}
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-900">Create Order</h4>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Equipment Category</label>
+                  <select value={form.equipment_category} onChange={e => setForm(f => ({ ...f, equipment_category: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="">Select category...</option>
+                    {EQUIPMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Description / Bundle</label>
+                  <select value={form.equipment_description} onChange={e => setForm(f => ({ ...f, equipment_description: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="">Select bundle or enter custom...</option>
+                    {BUNDLE_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Diagnosis Code</label>
+                    <input value={form.diagnosis_code} onChange={e => setForm(f => ({ ...f, diagnosis_code: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="G47.33" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Diagnosis</label>
+                    <input value={form.diagnosis_description} onChange={e => setForm(f => ({ ...f, diagnosis_description: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Obstructive Sleep Apnea" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Referring Physician</label>
+                    <input value={form.referring_physician} onChange={e => setForm(f => ({ ...f, referring_physician: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Dr. Reyes" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">NPI</label>
+                    <input value={form.referring_npi} onChange={e => setForm(f => ({ ...f, referring_npi: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="1234567890" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Notes</label>
+                  <textarea value={form.clinical_notes} onChange={e => setForm(f => ({ ...f, clinical_notes: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="e.g., patient requested different mask size" />
+                </div>
+
+                {/* Auto-refill toggle */}
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={form.auto_replace}
+                      onChange={e => setForm(f => ({ ...f, auto_replace: e.target.checked }))}
+                      className="rounded border-purple-300 text-purple-600 focus:ring-purple-500" />
+                    <span className="text-sm font-medium text-purple-800">Auto-Refill</span>
+                  </label>
+                  {form.auto_replace && (
+                    <select value={form.auto_replace_frequency}
+                      onChange={e => setForm(f => ({ ...f, auto_replace_frequency: e.target.value }))}
+                      className="w-full px-3 py-1.5 border border-purple-200 rounded-lg text-sm bg-white">
+                      {REFILL_FREQUENCIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* New patient form (no EMR match) */}
+          {step === 'newPatient' && (
+            <div className="space-y-4">
+              <button onClick={() => setStep('search')} className="text-xs text-blue-600 hover:text-blue-700">← Back to search</button>
+
+              <h4 className="text-sm font-semibold text-gray-900">New Patient</h4>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">First Name *</label>
+                  <input value={newPatient.first_name} onChange={e => setNewPatient(p => ({ ...p, first_name: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Last Name *</label>
+                  <input value={newPatient.last_name} onChange={e => setNewPatient(p => ({ ...p, last_name: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Date of Birth</label>
+                  <input type="date" value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Phone</label>
+                  <input value={newPatient.phone} onChange={e => setNewPatient(p => ({ ...p, phone: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="(210) 555-0100" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs font-medium text-gray-600">Email</label>
+                  <input type="email" value={newPatient.email} onChange={e => setNewPatient(p => ({ ...p, email: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Address</label>
+                  <input value={newPatient.address} onChange={e => setNewPatient(p => ({ ...p, address: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">City</label>
+                    <input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">State</label>
+                    <input value={newPatient.state} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" maxLength={2} placeholder="TX" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">ZIP</label>
+                    <input value={newPatient.zip} onChange={e => setNewPatient(p => ({ ...p, zip: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" maxLength={10} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Insurance</label>
+                  <input value={newPatient.insurance_payer} onChange={e => setNewPatient(p => ({ ...p, insurance_payer: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Aetna" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Member ID</label>
+                  <input value={newPatient.insurance_member_id} onChange={e => setNewPatient(p => ({ ...p, insurance_member_id: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Group</label>
+                  <input value={newPatient.insurance_group} onChange={e => setNewPatient(p => ({ ...p, insurance_group: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+              </div>
+
+              {/* Same order form as the patient step */}
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-900">Order Details</h4>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Equipment Category</label>
+                  <select value={form.equipment_category} onChange={e => setForm(f => ({ ...f, equipment_category: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="">Select category...</option>
+                    {EQUIPMENT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Description / Bundle</label>
+                  <select value={form.equipment_description} onChange={e => setForm(f => ({ ...f, equipment_description: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="">Select bundle or enter custom...</option>
+                    {BUNDLE_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={form.auto_replace}
+                      onChange={e => setForm(f => ({ ...f, auto_replace: e.target.checked }))}
+                      className="rounded border-purple-300 text-purple-600 focus:ring-purple-500" />
+                    <span className="text-sm font-medium text-purple-800">Auto-Refill</span>
+                  </label>
+                  {form.auto_replace && (
+                    <select value={form.auto_replace_frequency}
+                      onChange={e => setForm(f => ({ ...f, auto_replace_frequency: e.target.value }))}
+                      className="w-full px-3 py-1.5 border border-purple-200 rounded-lg text-sm bg-white">
+                      {REFILL_FREQUENCIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer — Create button */}
+        {(step === 'patient' || step === 'newPatient') && (
+          <div className="border-t px-5 py-4 bg-gray-50">
+            <button onClick={handleSubmit} disabled={creating || (!form.equipment_category && !form.equipment_description) ||
+              (step === 'newPatient' && (!newPatient.first_name || !newPatient.last_name))}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              {creating ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+              {creating ? 'Creating Order...' : 'Create Order'}
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+
 // ── Main component ───────────────────────────────────────────────
 
 const LANES = [
   { key: 'incoming',   label: 'New Orders',         icon: Inbox,       variant: 'warning',  color: 'text-amber-700' },
-  { key: 'autoRefill', label: 'Auto-Refill Due',    icon: RotateCcw,   variant: 'purple',   color: 'text-purple-700' },
   { key: 'inProgress', label: 'In Progress',        icon: Clock,       variant: 'info',     color: 'text-indigo-700' },
   { key: 'awaiting',   label: 'Awaiting Patient',   icon: UserCheck,   variant: 'cyan',     color: 'text-cyan-700' },
   { key: 'confirmed',  label: 'Ready to Order',     icon: ShoppingCart, variant: 'emerald', color: 'text-emerald-700' },
@@ -715,13 +1226,13 @@ export default function DMEAdmin() {
   const [rxHistory, setRxHistory] = useState([])
   const [error, setError] = useState(null)
   const [expiringEncounters, setExpiringEncounters] = useState([])
+  const [newOrderOpen, setNewOrderOpen] = useState(false)
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [dash, inc, refill, prog, await_, conf, hold, all] = await Promise.all([
+      const [dash, inc, prog, await_, conf, hold, all] = await Promise.all([
         getDMEDashboard(),
         getDMEIncoming(),
-        getDMEAutoRefillPending(),
         getDMEInProgress(),
         getDMEAwaitingPatient(),
         getDMEPatientConfirmed(),
@@ -729,7 +1240,7 @@ export default function DMEAdmin() {
         listDMEOrders(),
       ])
       setDashboard(dash)
-      setLanes({ incoming: inc, autoRefill: refill, inProgress: prog, awaiting: await_, confirmed: conf, onHold: hold })
+      setLanes({ incoming: inc, inProgress: prog, awaiting: await_, confirmed: conf, onHold: hold })
       setAllOrders(all)
     } catch (err) {
       console.error('DME admin load failed:', err)
@@ -807,6 +1318,10 @@ export default function DMEAdmin() {
           <p className="text-xs text-gray-400">Sleep medicine supply management</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setNewOrderOpen(true)}
+            className="text-sm flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+            <Plus size={14} /> New Order
+          </button>
           <button onClick={scanForPrescriptions} disabled={rxScanning}
             className="text-sm flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 transition-colors">
             {rxScanning ? <RefreshCw size={14} className="animate-spin" /> : <Pill size={14} />}
@@ -953,14 +1468,17 @@ export default function DMEAdmin() {
       <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
         <h3 className="font-medium text-blue-800 text-sm mb-1">DME Supply Workflow</h3>
         <ol className="text-sm text-blue-600 leading-relaxed list-decimal list-inside space-y-1">
-          <li>New orders and auto-refills appear in their respective lanes</li>
+          <li>New orders appear in the <strong>New Orders</strong> lane</li>
           <li>Check compliance (AirPM) and verify insurance coverage</li>
           <li><strong>Approve</strong>, then <strong>Send to Patient</strong> — generates a confirmation link</li>
           <li>Patient confirms address and chooses pickup or shipping</li>
           <li><strong>Order from Vendor</strong> when patient confirms, then track through delivery</li>
-          <li>Fulfilled orders auto-schedule the next refill based on frequency</li>
+          <li>Auto-refills are sent to patients automatically when due — look for the <span className="text-purple-600 font-medium">Auto Refill</span> badge in Awaiting Patient</li>
         </ol>
       </div>
+
+      {/* New Order slide-over panel */}
+      <NewOrderPanel open={newOrderOpen} onClose={() => setNewOrderOpen(false)} onCreated={load} />
     </div>
   )
 }

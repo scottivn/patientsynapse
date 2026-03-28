@@ -14,14 +14,17 @@ class PatientResource:
         self.client = client
 
     async def search_by_name_dob(
-        self, family: str, given: str, birthdate: str
+        self, family: str, given: str, birthdate: str = ""
     ) -> List[models.Patient]:
         """Search for patient by name and DOB. Returns match candidates."""
-        bundle = await self.client.search("Patient", {
-            "family": family,
-            "given": given,
-            "birthdate": birthdate,
-        })
+        params = {}
+        if family:
+            params["family"] = family
+        if given:
+            params["given"] = given
+        if birthdate:
+            params["birthdate"] = birthdate
+        bundle = await self.client.search("Patient", params)
         return [
             models.Patient(**entry["resource"])
             for entry in bundle.get("entry", [])
@@ -110,6 +113,18 @@ class CoverageResource:
         bundle = await self.client.search("Coverage", {"patient": patient_id})
         return [
             models.Coverage(**entry["resource"])
+            for entry in bundle.get("entry", [])
+        ]
+
+
+class DeviceResource:
+    def __init__(self, client: FHIRClient):
+        self.client = client
+
+    async def search_by_patient(self, patient_id: str) -> List[models.Device]:
+        bundle = await self.client.search("Device", {"patient": patient_id})
+        return [
+            models.Device(**entry["resource"])
             for entry in bundle.get("entry", [])
         ]
 

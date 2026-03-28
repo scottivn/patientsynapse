@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Package, MapPin, Truck, Store, CheckCircle2, XCircle, Clock, AlertCircle, Loader2, MessageSquare } from 'lucide-react'
-import { validateDMEConfirmation, submitDMEConfirmation, rejectDMEConfirmation } from '../services/api'
+import { validateDMEConfirmation, submitDMEConfirmation, rejectDMEConfirmation, toggleDMERefill } from '../services/api'
+import { RefreshCw } from 'lucide-react'
 
 const STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
@@ -28,10 +29,15 @@ function StatusBadge({ status }) {
 }
 
 function TrackingTimeline({ order }) {
-  const steps = [
+  const isPickup = order.fulfillment_method === 'pickup'
+  const steps = isPickup ? [
     { key: 'confirmed', label: 'Confirmed', done: order.patient_confirmed_address },
-    { key: 'ordering', label: 'Ordering', done: ['ordering', 'shipped', 'fulfilled'].includes(order.status) },
-    { key: 'shipped', label: order.fulfillment_method === 'pickup' ? 'Ready for Pickup' : 'Shipped', done: ['shipped', 'fulfilled'].includes(order.status) },
+    { key: 'ordering', label: 'Processing', done: ['ordering', 'shipped', 'fulfilled'].includes(order.status) },
+    { key: 'ready', label: 'Ready', done: ['shipped', 'fulfilled'].includes(order.status) },
+  ] : [
+    { key: 'confirmed', label: 'Confirmed', done: order.patient_confirmed_address },
+    { key: 'ordering', label: 'Processing', done: ['ordering', 'shipped', 'fulfilled'].includes(order.status) },
+    { key: 'shipped', label: 'Shipped', done: ['shipped', 'fulfilled'].includes(order.status) },
     { key: 'delivered', label: 'Delivered', done: order.status === 'fulfilled' },
   ]
 
@@ -72,10 +78,15 @@ export default function DMEConfirm() {
   const [fulfillment, setFulfillment] = useState('')
   const [notes, setNotes] = useState('')
   const [selectedItems, setSelectedItems] = useState([])
+  const [customizing, setCustomizing] = useState(false)
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [wantCallback, setWantCallback] = useState(false)
   const [rejected, setRejected] = useState(false)
+  const [autoRefill, setAutoRefill] = useState(false)
+  const [refillFrequency, setRefillFrequency] = useState('quarterly')
+  const [refillSaving, setRefillSaving] = useState(false)
+  const [refillSaved, setRefillSaved] = useState(false)
 
   useEffect(() => {
     validateDMEConfirmation(token)
@@ -90,6 +101,8 @@ export default function DMEConfirm() {
         if (data.bundle_items?.length) {
           setSelectedItems(data.selected_items?.length ? data.selected_items : [...data.bundle_items])
         }
+        setAutoRefill(!!data.auto_replace)
+        setRefillFrequency(data.auto_replace_frequency || 'quarterly')
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -287,26 +300,107 @@ export default function DMEConfirm() {
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6">
             <p className="text-sm font-medium text-blue-900">{order.equipment_description}</p>
             <p className="text-xs text-blue-700 mt-1">{order.equipment_category}</p>
-            {order.bundle_items?.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <p className="text-xs font-medium text-blue-800">Included supplies — uncheck any you don't need:</p>
-                {order.bundle_items.map(item => (
-                  <label key={item} className="flex items-center gap-2 text-sm text-blue-900 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedItems.includes(item)}
-                      onChange={() => toggleItem(item)}
-                      className="rounded border-blue-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    {item}
-                  </label>
-                ))}
+            {/* Auto-refill opt-in/out */}
+            <div className="mt-3 border-t border-blue-200 pt-3">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={autoRefill} disabled={refillSaving}
+                    onChange={async (e) => {
+                      const newVal = e.target.checked
+                      setAutoRefill(newVal)
+                      setRefillSaving(true)
+                      setRefillSaved(false)
+                      try {
+                        await toggleDMERefill(token, newVal, refillFrequency)
+                        setRefillSaved(true)
+                        setTimeout(() => setRefillSaved(false), 3000)
+                      } catch { setAutoRefill(!newVal) }
+                      finally { setRefillSaving(false) }
+                    }}
+                    className="rounded border-blue-300 text-blue-600 focus:ring-blue-500" />
+                  <span className="text-xs font-medium text-blue-800">Auto-refill supplies</span>
+                </label>
+                {refillSaving && <RefreshCw size={12} className="animate-spin text-blue-400" />}
+                {refillSaved && <span className="text-xs text-green-600">Saved</span>}
               </div>
-            )}
-            {order.auto_replace && (
-              <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
-                <Clock className="w-3 h-3" /> Auto-refill — {order.auto_replace_frequency}
-              </p>
+              {autoRefill && (
+                <div className="mt-2">
+                  <select value={refillFrequency} disabled={refillSaving}
+                    onChange={async (e) => {
+                      const freq = e.target.value
+                      setRefillFrequency(freq)
+                      setRefillSaving(true)
+                      setRefillSaved(false)
+                      try {
+                        await toggleDMERefill(token, true, freq)
+                        setRefillSaved(true)
+                        setTimeout(() => setRefillSaved(false), 3000)
+                      } catch {}
+                      finally { setRefillSaving(false) }
+                    }}
+                    className="w-full px-2 py-1.5 text-xs border border-blue-200 rounded-lg bg-white text-blue-800">
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Every 3 months</option>
+                    <option value="biannual">Every 6 months</option>
+                    <option value="annual">Annual</option>
+                  </select>
+                  <p className="text-[10px] text-blue-500 mt-1">We'll send you a link when supplies are due — no action needed until then.</p>
+                </div>
+              )}
+            </div>
+
+            {order.bundle_items?.length > 0 && (
+              <div className="mt-3 border-t border-blue-200 pt-3">
+                {!customizing ? (
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-blue-800">
+                      <CheckCircle2 className="w-3.5 h-3.5 inline mr-1 text-blue-600" />
+                      Keeping all {order.bundle_items.length} items
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setCustomizing(true)}
+                      className="text-xs text-blue-700 underline hover:text-blue-900"
+                    >
+                      I don't need everything
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs font-medium text-blue-800">
+                        Select the supplies you need ({selectedItems.length} of {order.bundle_items.length}):
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedItems([...order.bundle_items])
+                          setCustomizing(false)
+                        }}
+                        className="text-xs text-blue-700 underline hover:text-blue-900"
+                      >
+                        Keep all
+                      </button>
+                    </div>
+                    {order.bundle_items.map(item => (
+                      <label key={item} className="flex items-center gap-2 text-sm text-blue-900 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedItems.includes(item)}
+                          onChange={() => toggleItem(item)}
+                          className="rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        {item}
+                      </label>
+                    ))}
+                    {selectedItems.length === 0 && (
+                      <p className="text-xs text-amber-600 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> Please select at least one item, or skip this cycle below
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -380,7 +474,7 @@ export default function DMEConfirm() {
                 >
                   <Store className="w-6 h-6" />
                   <span className="text-sm font-medium">Pick up</span>
-                  <span className="text-xs text-gray-500">At our office</span>
+                  <span className="text-xs text-gray-500">5290 Medical Dr, SA TX 78229</span>
                 </button>
               </div>
               {!fulfillment && (
@@ -398,7 +492,7 @@ export default function DMEConfirm() {
               <textarea
                 value={notes} onChange={e => setNotes(e.target.value)}
                 rows={2}
-                placeholder="Any special instructions? (e.g., leave at front door)"
+                placeholder="Any special instructions? (e.g., change mask style or size, etc.)"
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm resize-none"
               />
             </div>
@@ -406,7 +500,7 @@ export default function DMEConfirm() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={!fulfillment || submitting}
+              disabled={!fulfillment || submitting || (customizing && selectedItems.length === 0)}
               className="w-full bg-blue-600 text-white rounded-lg py-3 text-sm font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? (

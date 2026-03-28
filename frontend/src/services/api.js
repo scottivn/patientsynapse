@@ -215,12 +215,22 @@ export const getDMEPatientConfirmed = () => request('/dme/orders/patient-confirm
 export const getDMEOnHold = () => request('/dme/orders/on-hold');
 export const getDMEEquipmentCategories = () => request('/dme/equipment-categories');
 
+// DME admin — patient search and order creation
+export const searchDMEPatients = (params) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/dme/patients/search?${qs}`);
+};
+export const createAdminDMEOrder = (data) =>
+  request('/dme/admin/orders', { method: 'POST', body: JSON.stringify(data) });
+
 // DME patient confirmation (public — no auth)
 export const validateDMEConfirmation = (token) => request(`/dme/confirm/${token}`);
 export const submitDMEConfirmation = (token, data) =>
   request(`/dme/confirm/${token}`, { method: 'POST', body: JSON.stringify(data) });
 export const rejectDMEConfirmation = (token, reason, callbackRequested) =>
   request(`/dme/confirm/${token}/reject`, { method: 'POST', body: JSON.stringify({ reason, callback_requested: callbackRequested }) });
+export const toggleDMERefill = (token, autoReplace, frequency = 'quarterly') =>
+  request(`/dme/confirm/${token}/toggle-refill`, { method: 'POST', body: JSON.stringify({ auto_replace: autoReplace, frequency }) });
 export const getDMEExpiringEncounters = (days = 14) => request(`/dme/orders/expiring-encounters?days=${days}`);
 export const processDMEAutoDeliveries = () => request('/dme/process-auto-deliveries', { method: 'POST' });
 export const getDMEReceipt = (orderId) => request(`/dme/orders/${orderId}/receipt`);

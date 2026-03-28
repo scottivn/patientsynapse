@@ -46,8 +46,12 @@ class FHIRClient:
         headers = await self._headers()
         resp = await client.get(f"/{resource_type}", params=params or {}, headers=headers)
         if not resp.is_success:
-            logger.error(f"FHIR SEARCH {resource_type} failed -> {resp.status_code}")
-        resp.raise_for_status()
+            logger.error(f"FHIR SEARCH {resource_type} failed -> {resp.status_code}: {resp.text[:200]}")
+            # Return empty bundle on 403 (scope not granted) or 404 (resource type unsupported)
+            # so callers degrade gracefully instead of crashing
+            if resp.status_code in (403, 404):
+                return {"resourceType": "Bundle", "type": "searchset", "total": 0, "entry": []}
+            resp.raise_for_status()
         logger.info(f"FHIR SEARCH {resource_type} -> {resp.status_code}")
         return resp.json()
 

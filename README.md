@@ -134,8 +134,8 @@ server/
     __init__.py               Factory: get_emr(), switch_emr()
   fhir/
     client.py                 Async FHIR R4 HTTP client
-    resources.py              FHIR resource helpers (Patient, Condition, etc.)
-    models.py                 Pydantic FHIR resource models
+    resources.py              FHIR resource helpers (Patient, Condition, Device, etc.)
+    models.py                 Pydantic FHIR resource models (includes Device, Annotation)
     stub_client.py            In-memory FHIR store for testing
   llm/
     base.py                   LLMProvider abstract class + standard prompts
@@ -445,6 +445,8 @@ All endpoints prefixed with `/api`. Auth column: **Admin** = `require_admin`, **
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
+| GET | `/dme/patients/search` | Admin, DME | Patient search by `?family=&given=&dob=` (name) or `?mrn=` (MRN). Returns demographics, FHIR Coverage (insurance), FHIR Device (equipment), and recent local DME order history. |
+| POST | `/dme/admin/orders` | Admin, DME | Staff-initiated DME order creation. Body: `DMEAdminOrderCreate` (extends `DMEOrderCreate` with `auto_replace`, `auto_replace_frequency`, `origin`). |
 | GET | `/dme/orders` | Admin, DME | List all DME orders, filter by `?status=` |
 | GET | `/dme/orders/{order_id}` | Admin, DME | Get single order |
 | POST | `/dme/orders/{order_id}/verify-insurance` | Admin, DME | Run FHIR coverage lookup + allowable rate pricing |
@@ -489,6 +491,7 @@ All endpoints prefixed with `/api`. Auth column: **Admin** = `require_admin`, **
 | GET | `/dme/confirm/{token}` | Public | Validate confirmation token, return safe order data (includes bundle_items/selected_items) |
 | POST | `/dme/confirm/{token}` | Public | Submit patient confirmation (address, fulfillment, selected items) |
 | POST | `/dme/confirm/{token}/reject` | Public | Patient flags issue — order → ON_HOLD with reason + optional callback request |
+| POST | `/dme/confirm/{token}/toggle-refill` | Public | Patient auto-refill opt-in/out. Body: `DMERefillToggle` (`auto_replace: bool`, `frequency: str`). Returns `{ status, auto_replace, frequency }`. |
 
 ### Referral Authorizations
 
@@ -593,6 +596,13 @@ Manages DME orders from creation through fulfillment. Sleep-medicine focused (CP
 
 | Method | Description |
 |---|---|
+| `search_patients(family, given, dob)` | FHIR patient search with Coverage (insurance), Device (equipment), and local DME order history enrichment |
+| `search_patients_by_mrn(mrn)` | Same enrichment as above, but searches by MRN identifier |
+| `get_patient_order_history(patient_id)` | SQL query for recent DME orders by patient_id |
+| `patient_toggle_refill(token, auto_replace, frequency)` | Token-gated auto-refill opt-in/out |
+| `_patient_to_dict(patient)` | Convert FHIR Patient to flat dict |
+| `_coverage_to_dict(coverages)` | Extract insurance from first active FHIR Coverage |
+| `_device_to_dict(device)` | Convert FHIR Device to flat dict |
 | `create_order(data)` | Create order with auto-replace scheduling |
 | `verify_insurance(order_id)` | FHIR Coverage lookup + allowable rate pricing |
 | `approve_order(order_id, notes)` | Staff approves |
@@ -685,6 +695,24 @@ Configured via `EMR_PROVIDER` env var. Hot-swappable at runtime via `POST /api/s
 
 Both implement the `EMRProvider` base class and expose FHIR R4 endpoints. The `StubFHIRClient` (`USE_STUB_FHIR=true`) provides an in-memory FHIR store for testing without EMR credentials.
 
+### FHIR Resource Classes (`server/fhir/resources.py`)
+
+| Class | Key Methods |
+|---|---|
+| `PatientResource` | `search_by_name_dob(family, given, dob)` — skips empty params. `search_by_identifier(mrn)` — MRN lookup. |
+| `ConditionResource` | `search_by_patient(patient_id)` |
+| `CoverageResource` | `search_by_patient(patient_id)` |
+| `DeviceResource` | `search_by_patient(patient_id)` — returns `List[Device]` for a patient |
+
+### FHIR Pydantic Models (`server/fhir/models.py`)
+
+Includes standard FHIR R4 models: `Patient`, `Condition`, `Coverage`, `ServiceRequest`, `DocumentReference`, plus:
+
+| Model | Fields | Purpose |
+|---|---|---|
+| `Device` | `id`, `status`, `type` (CodeableConcept), `manufacturer`, `modelNumber`, `serialNumber`, `patient` (Reference), `note` (List[Annotation]) | FHIR R4 Device resource for patient equipment tracking |
+| `Annotation` | `text`, `time`, `authorReference` | Helper model used by Device notes |
+
 ### LLM Providers
 
 Configured via `LLM_PROVIDER` env var. Hot-swappable at runtime via `POST /api/settings/llm`.
@@ -723,7 +751,7 @@ Bedrock uses the Anthropic messages format via `invoke_model` API and requires a
 | `/rcm` | RCM | admin | Revenue cycle dashboard |
 | `/settings` | Settings | admin | EMR/LLM provider switcher, OAuth connect |
 | `/admin/users` | UserManagement | admin | Create/edit/delete users, assign roles |
-| `/dme/admin` | DMEAdmin | admin, dme | Pipeline-based DME workflow (6 queue lanes); vendor dropdown, auto-deliver timer, expiring encounters banner, receipt/delivery ticket generation, patient rejection details |
+| `/dme/admin` | DMEAdmin | admin, dme | Pipeline-based DME workflow (6 queue lanes); vendor dropdown, auto-deliver timer, expiring encounters banner, receipt/delivery ticket generation, patient rejection details, **NewOrderPanel** slide-over (patient search by name+DOB or MRN, FHIR device/insurance/order history display, order creation with category, bundles, diagnosis, auto-refill toggle, new patient form) |
 | `/allowable-rates` | AllowableRates | admin, dme | Insurance rate management |
 
 Users who navigate to a route they don't have access to are redirected to their role's landing page (admin → `/`, front_office → `/faxes`, dme → `/dme/admin`).
@@ -734,7 +762,7 @@ Users who navigate to a route they don't have access to are redirected to their 
 |---|---|---|
 | `/login` | Login | Admin login form |
 | `/dme` | DMEOrder | Patient-facing DME info page |
-| `/dme/confirm/:token` | DMEConfirm | Patient confirmation (address, pickup/ship with $15 fee, bundle item selection, rejection form with callback option) |
+| `/dme/confirm/:token` | DMEConfirm | Patient confirmation (address, pickup/ship with $15 fee, bundle item selection, rejection form with callback option, auto-refill toggle with frequency selector) |
 
 ### Frontend API Client (`frontend/src/services/api.js`)
 
@@ -747,6 +775,9 @@ New DME functions added:
 | `processDMEAutoDeliveries()` | `POST /api/dme/process-auto-deliveries` | Auto-fulfill shipped orders past auto_deliver_after timestamp |
 | `getDMEReceipt(orderId)` | `GET /api/dme/orders/{order_id}/receipt` | Generate receipt for fulfilled/shipped order |
 | `getDMEDeliveryTicket(orderId)` | `GET /api/dme/orders/{order_id}/delivery-ticket` | Generate delivery ticket for shipped order |
+| `searchDMEPatients(params)` | `GET /api/dme/patients/search` | Search patients by name+DOB or MRN; returns demographics, insurance, devices, order history |
+| `createAdminDMEOrder(data)` | `POST /api/dme/admin/orders` | Staff-initiated DME order creation (extends standard order with auto-replace, frequency, origin) |
+| `toggleDMERefill(token, data)` | `POST /api/dme/confirm/{token}/toggle-refill` | Patient auto-refill opt-in/out with frequency selection |
 
 ---
 
@@ -771,6 +802,13 @@ Orders originate internally (prescription, auto-refill, staff-initiated, patient
 | `rejected` | Denied |
 | `on_hold` | Paused (includes patient-rejected orders with rejection details) |
 | `cancelled` | Patient declined or order cancelled |
+
+### Request Models
+
+| Model | Fields | Used By |
+|---|---|---|
+| `DMEAdminOrderCreate` | Extends `DMEOrderCreate` with `auto_replace: bool`, `auto_replace_frequency: str`, `origin: str` | `POST /dme/admin/orders` |
+| `DMERefillToggle` | `auto_replace: bool`, `frequency: str` | `POST /dme/confirm/{token}/toggle-refill` |
 
 ### Auto-Delivery Timer
 
@@ -814,7 +852,7 @@ Each category maps to HCPCS codes for automatic allowable rate lookups. Common s
 
 ### HIPAA Controls
 
-- **Audit logging** — `AuditMiddleware` logs all PHI-accessing requests to `phi_audit_log` table
+- **Audit logging** — `AuditMiddleware` logs all PHI-accessing requests to `phi_audit_log` table. PHI route prefixes: `/api/referrals`, `/api/faxes`, `/api/dme`, `/api/dme/admin`, `/api/dme/patients`, `/api/dme/confirm`, `/api/scheduling`, `/api/rcm`, `/api/referral-auths`, `/api/prescriptions`
 - **No PHI in logs** — patient names, DOB, SSN never logged; IDs only
 - **No PHI in error responses** — global exception handler returns generic messages
 - **No caching PHI** — `Cache-Control: no-store` on all API responses
@@ -897,6 +935,13 @@ Tests use an isolated SQLite database (temp file), `USE_STUB_FHIR=true`, and `ht
 | System & Rates | `tests/services/test_system_and_rates.py` | System status, EMR/LLM config endpoints, settings require admin, logout, provider search (with specialty filter), insurance verification stub, RCM dashboard + patient billing, allowable rates CRUD (create, lookup, delete, bundle pricing, list payers, 404 on missing), prescription/fax status endpoints, DME patient verify stub |
 | New Features | `tests/services/test_todo_features.py` | 20 tests: expanded fax document categories (8 types, lab_result→labs_imaging migration), DME patient rejection (POST confirm/{token}/reject, ON_HOLD transition, reason + callback flag), auto-delivery processing (7-day ship timer, immediate pickup), expiring encounters query (≤14 days), receipt + delivery ticket generation, bundle item selection (patient deselects items on confirmation page) |
 
+### Recent Bug Fixes
+
+| Fix | Details |
+|---|---|
+| `PatientResource.search_by_name_dob` empty params | Previously sent empty query params to the FHIR client, causing searches without DOB to return zero results. Now skips empty params. |
+| `_dme_service` FHIR client wiring | DME service was not getting the FHIR client wired at startup in `main.py` or in `switch_emr_provider`, causing `verify_insurance` to always fall through. Now wired in both locations. |
+
 ---
 
 ## Deployment
@@ -958,7 +1003,7 @@ OLLAMA_MODEL=llama3
 
 All included test data is entirely synthetic. Names, addresses, insurance IDs, and other identifiers are fictional and generated for workflow testing only.
 
-- **Stub FHIR** (`USE_STUB_FHIR=true`): 5 fictional patients with insurance and prescriptions — full pipeline works with zero EMR credentials
+- **Stub FHIR** (`USE_STUB_FHIR=true`): 5 fictional patients with insurance, prescriptions, and 5 Device resources (CPAP/BiPAP machines + masks for PT001, PT003, PT004) — full pipeline works with zero EMR credentials
 - **Dummy faxes**: Generated by `scripts/generate_dummy_faxes.py` — realistic format, synthetic content
 - **DME demo orders**: Auto-seeded if table is empty — fictional patient pool from stub data
 

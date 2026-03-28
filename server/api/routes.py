@@ -63,6 +63,19 @@ class DMEOrderCreate(BaseModel):
     supply_months: int = PydanticField(default=6, ge=1, le=36)
 
 
+class DMEAdminOrderCreate(DMEOrderCreate):
+    """Admin-only order creation — includes auto-refill and origin fields."""
+    auto_replace: bool = False
+    auto_replace_frequency: Optional[str] = PydanticField(default=None, max_length=20)
+    origin: str = PydanticField(default="staff_initiated", max_length=50)
+
+
+class DMERefillToggle(BaseModel):
+    """Patient auto-refill opt-in/out via confirmation token."""
+    auto_replace: bool
+    frequency: str = PydanticField(default="quarterly", max_length=20)
+
+
 # ---- Login rate limiter ----
 
 class _LoginRateLimiter:
@@ -827,6 +840,9 @@ async def switch_emr_provider(body: EMRSwitch):
     # Rewire referral auth service
     _referral_auth_service.set_fhir_client(fhir_client)
 
+    # Rewire DME service
+    _dme_service.set_fhir_client(fhir_client)
+
     logger.info(f"EMR switched to {emr.name}")
     return {
         "status": "switched",
@@ -1000,6 +1016,28 @@ async def dme_patient_verify(body: DMEPatientVerify):
     }
 
 
+@router.get("/dme/patients/search", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_patient_search(
+    family: str = Query("", min_length=0, max_length=100),
+    given: str = Query("", min_length=0, max_length=100),
+    dob: str = Query("", max_length=10),
+    mrn: str = Query("", max_length=100),
+):
+    """Search EMR for patients by name/DOB or MRN. Returns demographics, insurance, devices, and order history."""
+    if mrn:
+        return await _dme_service.search_patients_by_mrn(mrn)
+    if not family and not given:
+        raise HTTPException(400, "Provide at least a first or last name, or an MRN")
+    return await _dme_service.search_patients(family=family, given=given, dob=dob)
+
+
+@router.post("/dme/admin/orders", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def create_admin_dme_order(body: DMEAdminOrderCreate):
+    """Staff-initiated DME order creation with auto-refill support."""
+    order = await _dme_service.create_order(body.model_dump())
+    return _serialize_dme_order(order)
+
+
 @router.post("/dme/orders", tags=["DME Patient Portal"])
 async def create_dme_order(body: DMEOrderCreate):
     """Submit a new DME order from the patient portal."""
@@ -1091,7 +1129,8 @@ async def dme_equipment_categories():
 
 @router.get("/dme/dashboard", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
 async def dme_dashboard():
-    """DME summary stats for the admin portal."""
+    """DME summary stats for the admin portal. Also triggers auto-refill processing."""
+    await _dme_service.process_due_refills()
     return await _dme_service.get_dashboard()
 
 
@@ -1313,6 +1352,25 @@ async def reject_dme_confirmation(token: str, body: DMEPatientReject):
     if not order:
         raise HTTPException(404, "This link is invalid or has expired. Please contact our office.")
     return {"status": "received", "message": "We'll review this and get back to you."}
+
+
+@router.post("/dme/confirm/{token}/toggle-refill", tags=["DME Patient Portal"])
+async def toggle_dme_refill(token: str, body: DMERefillToggle):
+    """Patient opts in or out of auto-refill. PUBLIC endpoint — token-gated."""
+    order = await _dme_service.patient_toggle_refill(
+        token, body.auto_replace, body.frequency,
+    )
+    if not order:
+        raise HTTPException(404, "This link is invalid or has expired. Please contact our office.")
+    status = "enabled" if body.auto_replace else "disabled"
+    return {"status": status, "auto_replace": order.auto_replace, "frequency": order.auto_replace_frequency}
+
+
+@router.post("/dme/process-auto-refills", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_process_auto_refills():
+    """Process due auto-refill orders: create child orders and send confirmation to patients."""
+    created = await _dme_service.process_due_refills()
+    return {"processed": len(created), "order_ids": [o.id for o in created]}
 
 
 @router.post("/dme/process-auto-deliveries", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])

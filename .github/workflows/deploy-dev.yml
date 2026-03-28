@@ -1,0 +1,86 @@
+# PatientSynapse — Auto-deploy to dev on push to dev branch
+#
+# Requires GitHub Secret:
+#   EC2_SSH_KEY — contents of ~/.ssh/patientsynapse-key.pem
+#
+# To set up:
+#   1. Go to repo Settings → Secrets → Actions → New repository secret
+#   2. Name: EC2_SSH_KEY, Value: paste contents of patientsynapse-key.pem
+#
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H patientsynapse.com >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to EC2
+        run: |
+          # Sync code (excludes secrets, keys, local data)
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude '.venv' \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude '.env' \
+            --exclude 'keys/' \
+            --exclude 'IncomingFaxes/' \
+            --exclude '__pycache__' \
+            --exclude '.DS_Store' \
+            --exclude '.github' \
+            ./ ubuntu@patientsynapse.com:/opt/patientsynapse/
+
+          # Install deps and restart
+          ssh -i ~/.ssh/deploy_key ubuntu@patientsynapse.com << 'EOF'
+          cd /opt/patientsynapse
+          python3.12 -m venv .venv 2>/dev/null || true
+          .venv/bin/pip install -q --upgrade pip
+          .venv/bin/pip install -q -r requirements.txt
+          sudo systemctl restart patientsynapse
+          sudo systemctl restart nginx
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 3
+          JWKS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://patientsynapse.com/.well-known/jwks.json)
+          echo "JWKS endpoint: HTTP $JWKS_STATUS"
+          if [ "$JWKS_STATUS" != "200" ]; then
+            echo "::warning::JWKS endpoint returned $JWKS_STATUS (may need SSL cert renewal)"
+          fi
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

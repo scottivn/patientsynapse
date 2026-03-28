@@ -170,6 +170,45 @@ SUPPLY_BUNDLES = {
     ],
 }
 
+# Normalized lookup: lowercase key → bundle name for fuzzy matching
+_BUNDLE_LOOKUP = {k.lower(): k for k in SUPPLY_BUNDLES}
+
+
+def _resolve_bundle(description: str, category: str = "") -> List[str]:
+    """Resolve bundle items from description or category, using fuzzy matching.
+
+    Handles cases where description is a long string like
+    "Full resupply (nasal) — mask, cushion, headgear, tubing, chamber, filters"
+    that should still match the "Full Resupply (Nasal)" bundle.
+    """
+    # Exact match
+    if description in SUPPLY_BUNDLES:
+        return list(SUPPLY_BUNDLES[description])
+
+    # Case-insensitive exact match
+    desc_lower = description.lower()
+    if desc_lower in _BUNDLE_LOOKUP:
+        return list(SUPPLY_BUNDLES[_BUNDLE_LOOKUP[desc_lower]])
+
+    # Substring match — check if any bundle key appears at the start of the description
+    for key_lower, key_original in _BUNDLE_LOOKUP.items():
+        if desc_lower.startswith(key_lower):
+            return list(SUPPLY_BUNDLES[key_original])
+
+    # Reverse — check if description is contained within a bundle key
+    for key_lower, key_original in _BUNDLE_LOOKUP.items():
+        if key_lower in desc_lower:
+            return list(SUPPLY_BUNDLES[key_original])
+
+    # Category-based fallback: match category to a bundle containing that item
+    if category:
+        cat_lower = category.lower()
+        for key, items in SUPPLY_BUNDLES.items():
+            if any(cat_lower == item.lower() for item in items):
+                return list(items)
+
+    return []
+
 
 @dataclass
 class DMEDocument:
@@ -314,8 +353,8 @@ class DMEOrder:
             DMEOrderStatus.AWAITING_APPROVAL: "Under review",
             DMEOrderStatus.APPROVED: "Approved — we'll reach out shortly",
             DMEOrderStatus.PATIENT_CONTACTED: "Action needed — please confirm your details",
-            DMEOrderStatus.PATIENT_CONFIRMED: "Confirmed — ordering your supplies",
-            DMEOrderStatus.ORDERING: "Being fulfilled",
+            DMEOrderStatus.PATIENT_CONFIRMED: "Confirmed — preparing your supplies",
+            DMEOrderStatus.ORDERING: "In progress — being fulfilled",
             DMEOrderStatus.SHIPPED: "Shipped" if self.fulfillment_method == FulfillmentMethod.SHIP else "Ready for pickup",
             DMEOrderStatus.FULFILLED: "Delivered",
             DMEOrderStatus.REJECTED: "Unable to process — please contact our office",
@@ -645,6 +684,161 @@ class DMEService:
     def set_fhir_client(self, fhir_client):
         self._fhir_client = fhir_client
 
+    # ── Patient search (admin) ───────────────────────────────────
+
+    async def search_patients(self, family: str = "", given: str = "", dob: str = "") -> List[dict]:
+        """Search EMR for patients by name/DOB, returning demographics + insurance + devices."""
+        if not self._fhir_client:
+            logger.warning("Patient search attempted but FHIR client not connected")
+            return []
+
+        from server.fhir.resources import PatientResource, CoverageResource, DeviceResource
+        patient_res = PatientResource(self._fhir_client)
+        coverage_res = CoverageResource(self._fhir_client)
+        device_res = DeviceResource(self._fhir_client)
+
+        patients = await patient_res.search_by_name_dob(family, given, dob)
+        results = []
+        for p in patients[:20]:  # cap at 20 results
+            result = self._patient_to_dict(p)
+            # Fetch insurance
+            if p.id:
+                try:
+                    coverages = await coverage_res.search_by_patient(p.id)
+                    result["insurance"] = self._coverage_to_dict(coverages)
+                except Exception:
+                    result["insurance"] = {}
+                # Fetch devices
+                try:
+                    devices = await device_res.search_by_patient(p.id)
+                    result["devices"] = [self._device_to_dict(d) for d in devices]
+                except Exception:
+                    result["devices"] = []
+                # Fetch local order history
+                result["recent_orders"] = await self.get_patient_order_history(p.id)
+            results.append(result)
+        return results
+
+    async def search_patients_by_mrn(self, mrn: str) -> List[dict]:
+        """Search EMR for patients by MRN/identifier."""
+        if not self._fhir_client:
+            logger.warning("Patient search attempted but FHIR client not connected")
+            return []
+
+        from server.fhir.resources import PatientResource, CoverageResource, DeviceResource
+        patient_res = PatientResource(self._fhir_client)
+        coverage_res = CoverageResource(self._fhir_client)
+        device_res = DeviceResource(self._fhir_client)
+
+        patients = await patient_res.search_by_identifier(mrn)
+        results = []
+        for p in patients[:20]:
+            result = self._patient_to_dict(p)
+            if p.id:
+                try:
+                    coverages = await coverage_res.search_by_patient(p.id)
+                    result["insurance"] = self._coverage_to_dict(coverages)
+                except Exception:
+                    result["insurance"] = {}
+                try:
+                    devices = await device_res.search_by_patient(p.id)
+                    result["devices"] = [self._device_to_dict(d) for d in devices]
+                except Exception:
+                    result["devices"] = []
+                result["recent_orders"] = await self.get_patient_order_history(p.id)
+            results.append(result)
+        return results
+
+    async def get_patient_order_history(self, patient_id: str) -> List[dict]:
+        """Get recent DME orders for a patient from local DB."""
+        rows = await db_fetch_all(
+            "SELECT * FROM dme_orders WHERE patient_id = ? ORDER BY created_at DESC LIMIT 20",
+            (patient_id,),
+        )
+        orders = [_row_to_order(r) for r in rows]
+        return [
+            {
+                "id": o.id,
+                "status": o.status.value if hasattr(o.status, 'value') else o.status,
+                "equipment_category": o.equipment_category,
+                "equipment_description": o.equipment_description,
+                "created_at": o.created_at,
+                "fulfilled_at": o.fulfilled_at,
+                "auto_replace": o.auto_replace,
+                "auto_replace_frequency": o.auto_replace_frequency,
+            }
+            for o in orders
+        ]
+
+    @staticmethod
+    def _patient_to_dict(patient) -> dict:
+        """Convert FHIR Patient to a flat dict for frontend consumption."""
+        name = patient.primary_name
+        phone = ""
+        email = ""
+        for t in patient.telecom:
+            if t.system == "phone" and not phone:
+                phone = t.value or ""
+            if t.system == "email" and not email:
+                email = t.value or ""
+        addr = patient.address[0] if patient.address else None
+        return {
+            "patient_id": patient.id or "",
+            "first_name": name.given[0] if name and name.given else "",
+            "last_name": name.family if name else "",
+            "dob": patient.birthDate or "",
+            "phone": phone,
+            "email": email,
+            "address": " ".join(addr.line) if addr else "",
+            "city": addr.city or "" if addr else "",
+            "state": addr.state or "" if addr else "",
+            "zip": addr.postalCode or "" if addr else "",
+            "gender": patient.gender or "",
+            "insurance": {},
+            "devices": [],
+            "recent_orders": [],
+        }
+
+    @staticmethod
+    def _coverage_to_dict(coverages: list) -> dict:
+        """Extract insurance info from the first active FHIR Coverage."""
+        for cov in coverages:
+            if cov.status == "active":
+                payer = cov.payor[0].display if cov.payor else ""
+                member_id = ""
+                group = ""
+                # subscriberId may be a direct field or in class_
+                raw = cov.model_dump(by_alias=True)
+                member_id = raw.get("subscriberId", "")
+                grouping = raw.get("grouping", {})
+                if grouping:
+                    group = grouping.get("group", "")
+                return {
+                    "payer": payer,
+                    "member_id": member_id,
+                    "group": group,
+                }
+        return {}
+
+    @staticmethod
+    def _device_to_dict(device) -> dict:
+        """Convert FHIR Device to a flat dict."""
+        device_type = ""
+        if device.type and device.type.text:
+            device_type = device.type.text
+        elif device.type and device.type.coding:
+            device_type = device.type.coding[0].display or ""
+        notes = "; ".join(n.text for n in device.note if n.text)
+        return {
+            "id": device.id or "",
+            "type": device_type,
+            "manufacturer": device.manufacturer or "",
+            "model": device.modelNumber or "",
+            "serial_number": device.serialNumber or "",
+            "status": device.status or "",
+            "notes": notes,
+        }
+
     # ── Order creation ──────────────────────────────────────────
 
     async def create_order(self, data: dict) -> DMEOrder:
@@ -678,11 +872,10 @@ class DMEService:
             supply_months=data.get("supply_months", 6),
         )
 
-        # Populate bundle items if the description matches a known bundle
-        desc = order.equipment_description
-        if desc in SUPPLY_BUNDLES:
-            order.bundle_items = list(SUPPLY_BUNDLES[desc])
-            order.selected_items = list(SUPPLY_BUNDLES[desc])
+        # Populate bundle items if the description or category matches a known bundle
+        order.bundle_items = _resolve_bundle(order.equipment_description, order.equipment_category)
+        if order.bundle_items:
+            order.selected_items = list(order.bundle_items)
 
         if order.auto_replace and order.auto_replace_frequency:
             order.next_replace_date = self._compute_next_date(order.auto_replace_frequency)
@@ -1039,6 +1232,86 @@ class DMEService:
         )
         return [_row_to_order(r) for r in rows]
 
+    async def process_due_refills(self) -> List[DMEOrder]:
+        """Auto-process fulfilled orders whose refill date has arrived.
+
+        For each due order:
+        1. Creates a new child order cloned from the parent (patient/insurance/equipment info)
+        2. Sets origin=AUTO_REFILL, links to parent via parent_order_id
+        3. Generates a confirmation token and sets status to PATIENT_CONTACTED
+        4. Advances the parent's next_replace_date to the next cycle
+
+        Returns the list of newly created child orders (ready for patient confirmation).
+        """
+        due_orders = await self.get_auto_replace_due()
+        if not due_orders:
+            return []
+
+        created = []
+        for parent in due_orders:
+            # Create new child order from the parent's patient/equipment info
+            child = DMEOrder(
+                patient_first_name=parent.patient_first_name,
+                patient_last_name=parent.patient_last_name,
+                patient_dob=parent.patient_dob,
+                patient_phone=parent.patient_phone,
+                patient_email=parent.patient_email,
+                patient_address=parent.patient_address,
+                patient_city=parent.patient_city,
+                patient_state=parent.patient_state,
+                patient_zip=parent.patient_zip,
+                patient_id=parent.patient_id,
+                insurance_payer=parent.insurance_payer,
+                insurance_member_id=parent.insurance_member_id,
+                insurance_group=parent.insurance_group,
+                equipment_category=parent.equipment_category,
+                equipment_description=parent.equipment_description,
+                quantity=parent.quantity,
+                bundle_items=list(parent.bundle_items),
+                selected_items=list(parent.selected_items),
+                diagnosis_code=parent.diagnosis_code,
+                diagnosis_description=parent.diagnosis_description,
+                referring_physician=parent.referring_physician,
+                referring_npi=parent.referring_npi,
+                last_encounter_date=parent.last_encounter_date,
+                last_encounter_type=parent.last_encounter_type,
+                last_encounter_provider=parent.last_encounter_provider,
+                last_encounter_provider_npi=parent.last_encounter_provider_npi,
+                origin=OrderOrigin.AUTO_REFILL,
+                parent_order_id=parent.id,
+                auto_replace=True,
+                auto_replace_frequency=parent.auto_replace_frequency,
+                hcpcs_codes=list(parent.hcpcs_codes),
+                supply_months=parent.supply_months,
+            )
+
+            # Auto-generate confirmation token so patient gets notified immediately
+            token = secrets.token_urlsafe(32)
+            expires = datetime.now() + timedelta(hours=self.CONFIRMATION_TOKEN_EXPIRY_HOURS)
+            child.confirmation_token = token
+            child.confirmation_token_expires = expires.isoformat()
+            child.confirmation_sent_at = datetime.now().isoformat()
+            child.confirmation_sent_via = "sms"  # TODO: use patient's preferred contact method
+            child.status = DMEOrderStatus.PATIENT_CONTACTED
+
+            await _save_order(child)
+            logger.info(
+                f"Auto-refill: created order {child.id} from parent {parent.id} "
+                f"(patient {parent.patient_id or parent.patient_last_name})"
+            )
+
+            # Advance the parent's next_replace_date so it doesn't re-trigger
+            if parent.auto_replace_frequency:
+                parent.next_replace_date = self._compute_next_date(parent.auto_replace_frequency)
+            parent.updated_at = datetime.now().isoformat()
+            await _save_order(parent)
+
+            created.append(child)
+
+        if created:
+            logger.info(f"Auto-refill: processed {len(created)} due refills")
+        return created
+
     async def get_encounter_expired(self) -> List[DMEOrder]:
         excluded = [DMEOrderStatus.FULFILLED.value, DMEOrderStatus.REJECTED.value,
                     DMEOrderStatus.CANCELLED.value]
@@ -1151,6 +1424,27 @@ class DMEService:
         order.confirmation_responded_at = datetime.now().isoformat()
         order.updated_at = datetime.now().isoformat()
         logger.info(f"DME order {order.id} rejected by patient (callback={callback_requested})")
+        await _save_order(order)
+        return order
+
+    # ── Patient auto-refill toggle ──────────────────────────
+
+    async def patient_toggle_refill(self, token: str, auto_replace: bool,
+                                     frequency: str = "quarterly") -> Optional[DMEOrder]:
+        """Patient opts in or out of auto-refill via their confirmation link."""
+        order = await self.validate_confirmation_token(token)
+        if not order:
+            return None
+        order.auto_replace = auto_replace
+        if auto_replace:
+            order.auto_replace_frequency = frequency
+            order.next_replace_date = self._compute_next_date(frequency)
+            logger.info(f"DME order {order.id} patient opted IN to auto-refill ({frequency})")
+        else:
+            order.auto_replace_frequency = None
+            order.next_replace_date = None
+            logger.info(f"DME order {order.id} patient opted OUT of auto-refill")
+        order.updated_at = datetime.now().isoformat()
         await _save_order(order)
         return order
 

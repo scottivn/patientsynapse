@@ -85,7 +85,13 @@ async def lifespan(app: FastAPI):
 
     # Seed DME demo data (idempotent — skips if orders already exist)
     from server.api.routes import _dme_service
+    _dme_service.set_fhir_client(fhir_client)
     await _dme_service.seed_demo_data()
+
+    # Process any auto-refills that came due (creates child orders + sends to patients)
+    refills = await _dme_service.process_due_refills()
+    if refills:
+        logger.info(f"Startup: auto-processed {len(refills)} due refills")
 
     # Prescription monitor — polls eCW for new Rx documents → auto-creates DME orders
     rx_monitor = PrescriptionMonitorService(fhir_client, _dme_service)
