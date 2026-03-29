@@ -427,7 +427,10 @@ async def import_from_excel(filepath: str, effective_year: Optional[int] = None)
 
 import re
 
-_HCPCS_PATTERN = re.compile(r'([A-Za-z])(\d{4})')
+# Matches "A7030", "E0601", etc. (letter + 4 digits)
+_HCPCS_PREFIXED = re.compile(r'([A-Za-z])(\d{4})')
+# Matches bare 4-digit codes common in this spreadsheet: "7030", "4604"
+_HCPCS_BARE = re.compile(r'^(\d{4})$')
 _AMOUNT_PATTERN = re.compile(r'(\d+\.?\d*)')
 
 # Payer name patterns for header detection
@@ -441,6 +444,7 @@ _PAYER_PATTERNS = [
     (re.compile(r'UHC\s*Med', re.I), "UHC", "medicare_advantage"),
     (re.compile(r'MEDICARE\s*\d\s*mon', re.I), "Medicare", ""),
     (re.compile(r'MEDICARE', re.I), "Medicare", ""),
+    (re.compile(r'MED\s+\d\s*MON', re.I), "Medicare", ""),
     (re.compile(r'WellMed[\s-]*UHC', re.I), "WellMed-UHC", ""),
     (re.compile(r'WellMed[\s-]*Humana', re.I), "WellMed-Humana", ""),
     (re.compile(r'WellMed', re.I), "WellMed", ""),
@@ -463,33 +467,86 @@ _EQUIP_PATTERNS = [
 
 _SUPPLY_PATTERN = re.compile(r'(\d)\s*(?:mon|m\b|month)', re.I)
 
+# Sub-header patterns: cells that describe supply/type but no payer name
+_SUBHEADER_PATTERN = re.compile(
+    r'(?:\d\s*(?:mon|m\b|month)|ffm|full\s*face|nasal|pillow|cushion)',
+    re.I,
+)
+
+
+def _parse_hcpcs(cell_str: str) -> str | None:
+    """Extract an HCPCS code from a cell string. Handles 'A7030', 'a7030', or bare '7030'."""
+    m = _HCPCS_PREFIXED.search(cell_str)
+    if m:
+        return f"{m.group(1).upper()}{m.group(2)}"
+    # Bare 4-digit code in its own cell (column 0 / key column pattern)
+    bare = cell_str.strip()
+    if _HCPCS_BARE.match(bare):
+        return f"A{bare}"
+    return None
+
 
 def _identify_sections(grid: list, warnings: list) -> list[dict]:
     """Scan the grid for payer section headers.
 
-    Returns list of section dicts: {payer, payer_plan, col, equip_type, supply_months, header_row}
+    Handles two layouts:
+    1. Payer name + supply/type in one cell (e.g., "Aetna reg 6 month ffm")
+    2. Payer name alone (e.g., "BCBS") with sub-headers in adjacent cells
+       (e.g., "6 month ffm", "3 month nasal"). These inherit the payer.
     """
     sections = []
     if not grid:
         return sections
 
-    # Scan all rows for cells that look like payer headers
     for row_idx, row in enumerate(grid):
+        # Track the last payer found on this row for sub-header inheritance
+        row_payer = None
+        row_plan = ""
+        row_payer_col = -1
+
         for col_idx, cell in enumerate(row):
             if cell is None:
                 continue
             cell_str = str(cell).strip()
-            if len(cell_str) < 3 or len(cell_str) > 80:
+            if len(cell_str) < 2 or len(cell_str) > 80:
                 continue
 
             # Check if cell matches a known payer
+            matched_payer = False
             for pattern, payer, plan in _PAYER_PATTERNS:
                 if pattern.search(cell_str):
-                    # Determine supply months from header text
                     supply_match = _SUPPLY_PATTERN.search(cell_str)
                     supply_months = int(supply_match.group(1)) if supply_match else 6
 
-                    # Determine equipment type
+                    equip_type = ""
+                    for ep, etype in _EQUIP_PATTERNS:
+                        if ep.search(cell_str):
+                            equip_type = etype
+                            break
+
+                    # Only add as section if it has supply/type info OR is a payer-only header
+                    has_detail = bool(supply_match) or bool(equip_type)
+                    if has_detail:
+                        sections.append({
+                            "payer": payer, "payer_plan": plan,
+                            "col": col_idx, "header_row": row_idx,
+                            "supply_months": supply_months, "equip_type": equip_type,
+                            "header_text": cell_str[:60],
+                        })
+                    # Track as row payer for sub-header inheritance
+                    row_payer = payer
+                    row_plan = plan
+                    row_payer_col = col_idx
+                    matched_payer = True
+                    break
+
+            # If no payer matched, check if this is a sub-header (supply/type only)
+            # that should inherit the payer from the left
+            if not matched_payer and row_payer and col_idx > row_payer_col:
+                if _SUBHEADER_PATTERN.search(cell_str):
+                    supply_match = _SUPPLY_PATTERN.search(cell_str)
+                    supply_months = int(supply_match.group(1)) if supply_match else 6
+
                     equip_type = ""
                     for ep, etype in _EQUIP_PATTERNS:
                         if ep.search(cell_str):
@@ -497,18 +554,31 @@ def _identify_sections(grid: list, warnings: list) -> list[dict]:
                             break
 
                     sections.append({
-                        "payer": payer,
-                        "payer_plan": plan,
-                        "col": col_idx,
-                        "header_row": row_idx,
-                        "supply_months": supply_months,
-                        "equip_type": equip_type,
-                        "header_text": cell_str[:60],
+                        "payer": row_payer, "payer_plan": row_plan,
+                        "col": col_idx, "header_row": row_idx,
+                        "supply_months": supply_months, "equip_type": equip_type,
+                        "header_text": f"{row_payer}: {cell_str[:50]}",
                     })
-                    break  # Don't match multiple payer patterns for same cell
 
     logger.info(f"Excel import: found {len(sections)} payer section headers")
     return sections
+
+
+def _find_hcpcs_columns(grid: list, header_row: int, scan_rows: int = 15) -> list[int]:
+    """Find columns that contain HCPCS codes (key columns) near a header row."""
+    hcpcs_cols = set()
+    for row_idx in range(header_row + 1, min(header_row + scan_rows, len(grid))):
+        row = grid[row_idx]
+        for col_idx, cell in enumerate(row):
+            if cell is None:
+                continue
+            code = _parse_hcpcs(str(cell).strip())
+            if code and code[0] == "A":
+                # If the cell is JUST a code (no amount mixed in), it's a key column
+                cell_str = str(cell).strip()
+                if _HCPCS_BARE.match(cell_str) or len(cell_str) <= 5:
+                    hcpcs_cols.add(col_idx)
+    return sorted(hcpcs_cols)
 
 
 def _extract_section_rates(
@@ -525,8 +595,9 @@ def _extract_section_rates(
     payer_plan = section["payer_plan"]
     supply_months = section["supply_months"]
 
-    # Scan downward from header, looking for HCPCS codes in any nearby column
-    # and amounts in this column
+    # Find HCPCS key columns near this section
+    hcpcs_key_cols = _find_hcpcs_columns(grid, section["header_row"])
+
     for row_idx in range(start_row, min(start_row + 15, len(grid))):
         row = grid[row_idx]
         if col >= len(row):
@@ -536,51 +607,72 @@ def _extract_section_rates(
         if cell_val is None:
             continue
         cell_str = str(cell_val).strip()
+        if not cell_str:
+            continue
 
-        # Try to extract HCPCS code from this cell or adjacent cells
         hcpcs = None
         amount = None
 
-        # Check if cell has a code + amount combined (e.g., "A7034 63.25")
-        code_match = _HCPCS_PATTERN.search(cell_str)
-        if code_match:
-            hcpcs = f"{code_match.group(1).upper()}{code_match.group(2)}"
+        # Check if cell has a code + amount combined (e.g., "A7034 63.25" or "a7030 56")
+        hcpcs = _parse_hcpcs(cell_str)
+        if hcpcs:
+            # Extract amount from same cell if present
+            amounts = _AMOUNT_PATTERN.findall(cell_str)
+            # Filter out the HCPCS digits from the amounts
+            hcpcs_digits = hcpcs[1:]  # e.g., "7030"
+            for a in reversed(amounts):
+                if a != hcpcs_digits and a not in hcpcs_digits:
+                    try:
+                        val = float(a)
+                        if 0 < val < 5000:
+                            amount = val
+                            break
+                    except ValueError:
+                        pass
 
         # Check if cell is a pure number (rate value)
-        try:
-            amount = float(cell_str.replace(",", ""))
-            if amount > 5000 or amount <= 0:
-                amount = None  # Unlikely to be a single item rate
-        except (ValueError, TypeError):
-            # Try extracting amount from mixed cell
-            amounts = _AMOUNT_PATTERN.findall(cell_str)
-            if amounts:
-                try:
-                    amt = float(amounts[-1])  # Take the last number (usually the rate)
-                    if 0 < amt < 5000:
-                        amount = amt
-                except ValueError:
-                    pass
+        if hcpcs is None:
+            try:
+                val = float(cell_str.replace(",", ""))
+                if 0 < val < 5000:
+                    amount = val
+            except (ValueError, TypeError):
+                amounts = _AMOUNT_PATTERN.findall(cell_str)
+                if amounts:
+                    try:
+                        val = float(amounts[-1])
+                        if 0 < val < 5000:
+                            amount = val
+                    except ValueError:
+                        pass
 
-        # If we have a code but no amount, check the adjacent column
+        # If we have a code but no amount, check the adjacent column to the right
         if hcpcs and amount is None and col + 1 < len(row):
             adj = row[col + 1]
             if adj is not None:
                 try:
-                    amount = float(str(adj).strip().replace(",", ""))
-                    if amount > 5000 or amount <= 0:
-                        amount = None
+                    val = float(str(adj).strip().replace(",", ""))
+                    if 0 < val < 5000:
+                        amount = val
                 except (ValueError, TypeError):
                     pass
 
-        # If we have an amount but no code, check the left column(s) for a code
+        # If we have an amount but no code, look in HCPCS key columns for this row
         if amount is not None and hcpcs is None:
-            for check_col in range(max(0, col - 2), col):
-                if check_col < len(row) and row[check_col] is not None:
-                    m = _HCPCS_PATTERN.match(str(row[check_col]).strip())
-                    if m:
-                        hcpcs = f"{m.group(1).upper()}{m.group(2)}"
+            for key_col in hcpcs_key_cols:
+                if key_col < len(row) and row[key_col] is not None:
+                    code = _parse_hcpcs(str(row[key_col]).strip())
+                    if code:
+                        hcpcs = code
                         break
+            # Fallback: check columns to the left (up to 3)
+            if hcpcs is None:
+                for check_col in range(max(0, col - 3), col):
+                    if check_col < len(row) and row[check_col] is not None:
+                        code = _parse_hcpcs(str(row[check_col]).strip())
+                        if code:
+                            hcpcs = code
+                            break
 
         # If we found both, create a rate
         if hcpcs and amount is not None and amount > 0:

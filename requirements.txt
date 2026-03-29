@@ -22,6 +22,9 @@ boto3>=1.35.0               # AWS Bedrock (HIPAA-eligible)
 # openai>=1.50.0          # Uncomment when using OpenAI
 # anthropic>=0.39.0       # Uncomment when using Anthropic
 
+# Excel import (allowable rates)
+openpyxl>=3.1.0
+
 # OCR / PDF
 pypdf>=4.0
 PyMuPDF>=1.24

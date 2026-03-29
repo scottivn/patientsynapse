@@ -325,6 +325,8 @@
     <a href="#scheduling">Scheduling</a>
     <a href="#rcm">RCM</a>
     <a href="#rates">Allowable Rates</a>
+    <a href="#prior-auth">Prior Auth</a>
+    <a href="#inventory">Inventory</a>
     <a href="#settings">Settings</a>
     <a href="#users">User Mgmt</a>
     <a href="#api">API Explorer</a>
@@ -384,6 +386,14 @@
       <div class="num">Workflow 8</div>
       <div class="title">Revenue Cycle Management</div>
       <div class="desc">KPI dashboard, billing data</div>
+    </a>
+    <a href="#prior-auth" class="toc-card">
+      <div class="toc-step">10</div>
+      <div><strong>Prior Auth</strong><br><small>Payer authorization tracking</small></div>
+    </a>
+    <a href="#inventory" class="toc-card">
+      <div class="toc-step">11</div>
+      <div><strong>Inventory</strong><br><small>In-house stock management</small></div>
     </a>
     <a href="#rates" class="toc-card">
       <div class="num">Workflow 9</div>
@@ -504,24 +514,27 @@ Prescription monitor initialized</code></pre>
   <h2>Workflow 2: DME Order Lifecycle <span class="badge badge-dme">DME + Admin</span></h2>
   <p class="section-desc">10 demo orders are pre-seeded across every workflow state. Explore the full lifecycle from intake to fulfillment.</p>
 
-  <h3>DME Dashboard</h3>
+  <h3>DME Kanban Board</h3>
   <ol class="steps">
     <li>
       <strong>Navigate to DME Admin</strong> via sidebar &rarr; <code>/dme/admin</code><br>
-      The dashboard shows order counts by status and queue breakdowns.
+      The dashboard shows a horizontal <strong>kanban board</strong> with orders flowing left to right through the fulfillment pipeline.
     </li>
     <li>
-      <strong>Review the queue tabs.</strong> Each queue filters orders by workflow stage:
+      <strong>Review the kanban columns.</strong> Orders move through 5 stages:
 
       <table>
-        <tr><th>Queue</th><th>What it shows</th><th>Demo orders</th></tr>
-        <tr><td>Incoming</td><td>New orders needing review</td><td>Maria Garcia, Robert Johnson</td></tr>
-        <tr><td>Auto-Refill Due</td><td>Fulfilled orders past their replace date</td><td>Carmen Martinez, Albert Ortiz</td></tr>
-        <tr><td>In Progress</td><td>Verified/approved/ordering orders</td><td>Linda Chen, David Hernandez</td></tr>
-        <tr><td>Awaiting Patient</td><td>Confirmation sent, waiting for response</td><td>Sandra Perez</td></tr>
-        <tr><td>Patient Confirmed</td><td>Patient confirmed, ready to order</td><td>James Wilson</td></tr>
-        <tr><td>On Hold</td><td>Paused orders</td><td>Michael Thompson</td></tr>
+        <tr><th>Column</th><th>Statuses</th><th>Primary Action</th><th>Demo orders</th></tr>
+        <tr><td><strong>New / Review</strong></td><td>pending, verified, approved</td><td>Approve &amp; Send to Patient</td><td>Maria Garcia, Robert Johnson, Linda Chen, David Hernandez</td></tr>
+        <tr><td><strong>Awaiting Patient</strong></td><td>patient_contacted</td><td>Patient Link (view URL)</td><td>Sandra Perez</td></tr>
+        <tr><td><strong>Confirmed</strong></td><td>patient_confirmed</td><td>Order from Vendor</td><td>James Wilson</td></tr>
+        <tr><td><strong>Ordering</strong></td><td>ordering</td><td>Mark Shipped</td><td>&mdash;</td></tr>
+        <tr><td><strong>Shipped</strong></td><td>shipped</td><td>Mark Delivered</td><td>Patricia Ramirez</td></tr>
       </table>
+      <p style="font-size:0.85rem;color:var(--gray-500);margin-top:0.5rem;"><strong>On Hold</strong> orders (Michael Thompson) display as a horizontal bar below the kanban. Auto-refill due orders (Carmen Martinez, Albert Ortiz) appear in the dashboard stats.</p>
+    </li>
+    <li>
+      <strong>Click any order card</strong> to open the detail modal with full patient info, insurance, clinical notes, prior-auth status, and action buttons.
     </li>
   </ol>
 
@@ -583,46 +596,40 @@ Prescription monitor initialized</code></pre>
   <ol class="steps">
     <li>
       <strong>Open Maria Garcia's pending order</strong><br>
-      Click her row in the Incoming queue. Review patient info, insurance, equipment, and clinical notes.
+      Click her card in the <strong>New / Review</strong> column. Review patient info, insurance, equipment, and clinical notes in the detail modal.
     </li>
     <li>
-      <strong>Verify insurance</strong><br>
-      Click <strong>"Verify Insurance"</strong>. In stub mode, this records a manual verification note.
-      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/verify-insurance</code></div>
+      <strong>Check prior authorization</strong> (optional &mdash; see <a href="#prior-auth">Prior Auth</a> section)<br>
+      In the Prior Auth section of the modal, click <strong>"Check if Required"</strong>. If her insurance is HMO/Medicare, auth is required. Create and approve it before proceeding.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/prior-auth/check</code></div>
     </li>
     <li>
-      <strong>Approve the order</strong><br>
-      Click <strong>"Approve"</strong>. Status changes to <span class="status s-approved">Approved</span>.
-      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/approve</code></div>
-    </li>
-    <li>
-      <strong>Send patient confirmation</strong><br>
-      Click <strong>"Send Confirmation"</strong>. Choose SMS or Email. A unique token URL is generated.<br>
-      Status changes to <span class="status s-contacted">Patient Contacted</span>.
-      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/send-confirmation</code></div>
-      <div class="callout callout-info">
-        <span class="callout-icon">&#x1f4f1;</span>
-        <div>In production, this sends a real SMS/email. In demo mode, copy the token from the response to simulate patient confirmation.</div>
+      <strong>One-click Approve &amp; Send</strong><br>
+      Click <strong>"Approve &amp; Send to Patient"</strong> on the kanban card. This chains approve + generate confirmation token in one action.<br>
+      The card moves to the <strong>Awaiting Patient</strong> column.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/approve</code> + <code>/api/dme/orders/{id}/send-confirmation</code></div>
+      <div class="callout callout-warn">
+        <span class="callout-icon">&#x26a0;&#xfe0f;</span>
+        <div>If a prior-auth is pending/submitted/denied, the Approve button is <strong>disabled</strong> with "Auth Required". The order cannot proceed until the auth is approved. See <a href="#prior-auth">Prior Auth</a>.</div>
       </div>
     </li>
     <li>
       <strong>Patient confirms (see <a href="#patient-portal">Patient Portal</a> below)</strong><br>
-      Use the returned confirmation token to complete the patient-facing flow.
+      Use the demo token or copy from the response. Patient chooses ship/pickup, selects bundle items, confirms address.
     </li>
     <li>
-      <strong>Mark as ordered from vendor</strong><br>
-      Click <strong>"Mark Ordered"</strong>. Enter vendor name and order ID.<br>
-      Status changes to <span class="status" style="background:#fef3c7;color:#92400e;">Ordering</span>.
+      <strong>Order from vendor</strong><br>
+      In the <strong>Confirmed</strong> column, click the order card &rarr; <strong>"Order from Vendor"</strong>. Select vendor: <strong>In-House</strong>, <strong>PPM</strong> (opens portal link), <strong>VGM</strong> (opens portal link), or <strong>Other</strong>.
       <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/mark-ordered</code></div>
     </li>
     <li>
       <strong>Mark as shipped</strong><br>
-      Enter tracking number and carrier. Status changes to <span class="status s-shipped">Shipped</span>.
+      Enter tracking number and carrier. Card moves to <strong>Shipped</strong> column. Auto-deliver timer starts (7 days for ship, immediate for pickup).
       <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/mark-shipped</code></div>
     </li>
     <li>
       <strong>Mark as fulfilled</strong><br>
-      Click <strong>"Fulfill"</strong>. Order is complete. Status: <span class="status s-fulfilled">Fulfilled</span>.
+      Click <strong>"Mark Delivered"</strong>. Order is complete. If auto-replace is enabled, next resupply date is scheduled.
       <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/fulfill</code></div>
     </li>
   </ol>
@@ -630,12 +637,15 @@ Prescription monitor initialized</code></pre>
   <h3>Other DME actions to demo</h3>
   <table>
     <tr><th>Action</th><th>Demo it on</th><th>What to show</th></tr>
-    <tr><td>Place on hold</td><td>Any active order</td><td>Enter a hold reason &rarr; order moves to hold queue</td></tr>
+    <tr><td>Reject order</td><td>Any pending order</td><td>Click <strong>Reject</strong> &rarr; preset reasons (non-compliant CPAP, encounter expired, insurance failed) with editable text + SMS/email notification toggle</td></tr>
+    <tr><td>Place on hold</td><td>Any active order</td><td>Enter a hold reason &rarr; order moves to On Hold bar below kanban</td></tr>
     <tr><td>Resume from hold</td><td>Michael Thompson</td><td>Restores previous status automatically</td></tr>
+    <tr><td>Prior auth gate</td><td>Any HMO order</td><td>Create a pending auth &rarr; Approve button becomes disabled &rarr; approve auth &rarr; Approve button re-enables</td></tr>
     <tr><td>Update compliance</td><td>Any order</td><td>Enter CPAP usage hours/days &rarr; compliant/non-compliant badge</td></tr>
     <tr><td>Record encounter</td><td>Robert Johnson (expired)</td><td>Updates encounter date &rarr; encounter_current flips to true</td></tr>
     <tr><td>Attach document</td><td>Any order</td><td>Add Rx scan, sleep study, etc. by filename</td></tr>
-    <tr><td>Reject order</td><td>Any pending order</td><td>Enter rejection reason &rarr; shows in order detail</td></tr>
+    <tr><td>Generate receipt</td><td>Any shipped/fulfilled order</td><td>Receipt with patient, equipment, pricing, vendor details</td></tr>
+    <tr><td>New order (staff)</td><td>Click <strong>"+ New Order"</strong></td><td>Slide-over panel: patient search (name+DOB or MRN), FHIR data display, equipment/diagnosis/auto-refill selection</td></tr>
   </table>
 </section>
 
@@ -1008,9 +1018,127 @@ Prescription monitor initialized</code></pre>
 </section>
 
 
+<!-- ────────────────────── PRIOR AUTH ────────────────────── -->
+<section id="prior-auth">
+  <h2>Workflow 10: Prior Authorization <span class="badge badge-dme">DME + Admin</span></h2>
+  <p class="section-desc">Track payer approvals required before DME fulfillment. Distinct from referral auths (HMO visit tracking).</p>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">&#x1f4cb;</span>
+    <div><strong>Auth-required rules:</strong> HMO/POS &rarr; all equipment requires auth. Medicare/EPO &rarr; only CPAP (E0601) and BiPAP (E0470). PPO &rarr; never required. Insurance type is auto-detected from FHIR Coverage or payer name.</div>
+  </div>
+
+  <ol class="steps">
+    <li>
+      <strong>Open any order in the New/Review column</strong> and scroll to the <strong>Prior Authorization</strong> section in the detail modal.
+    </li>
+    <li>
+      <strong>Check if auth is required</strong><br>
+      Click <strong>"Check if Required"</strong>. The system checks the order's insurance type and HCPCS codes against the rules engine.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/prior-auth/check</code></div>
+      <p style="font-size:0.85rem;">Returns <code>{ required: true/false, insurance_type: "hmo", reason: "..." }</code></p>
+    </li>
+    <li>
+      <strong>Create an auth request</strong> (if required)<br>
+      Click <strong>"Create Auth Request"</strong>. The system pre-fills patient, payer, diagnosis codes, and HCPCS from the order.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/orders/{id}/prior-auth</code></div>
+      <p style="font-size:0.85rem;">Status starts as <span class="status s-pending">Pending</span>. The order's Approve button is now <strong>disabled</strong>.</p>
+    </li>
+    <li>
+      <strong>Submit to payer</strong><br>
+      Click <strong>"Mark Submitted"</strong> and add notes (e.g., "Faxed to Aetna 555-0100").
+      <div class="endpoint"><span class="method m-put">PUT</span> <code>/api/dme/prior-auth/{auth_id}</code> with <code>{ action: "submit" }</code></div>
+    </li>
+    <li>
+      <strong>Record approval</strong><br>
+      Click <strong>"Record Approval"</strong>. Enter the payer's auth number and expiration date.
+      <div class="endpoint"><span class="method m-put">PUT</span> <code>/api/dme/prior-auth/{auth_id}</code> with <code>{ action: "approve", auth_number: "PA-12345", valid_until: "2027-06-01" }</code></div>
+      <p style="font-size:0.85rem;">The auth badge turns <span class="status s-approved">Approved</span> and the Approve button re-enables.</p>
+    </li>
+    <li>
+      <strong>(Alternative) Record denial</strong><br>
+      Click <strong>"Record Denial"</strong> with a reason. The order stays blocked. Staff can submit a new request after addressing the denial.
+      <div class="endpoint"><span class="method m-put">PUT</span> <code>/api/dme/prior-auth/{auth_id}</code> with <code>{ action: "deny", denial_reason: "Not medically necessary" }</code></div>
+    </li>
+    <li>
+      <strong>View the prior-auth dashboard</strong>
+      <div class="endpoint"><span class="method m-get">GET</span> <code>/api/dme/prior-auth/dashboard</code></div>
+      <p style="font-size:0.85rem;">Shows counts: pending, submitted, approved, denied, expired.</p>
+    </li>
+  </ol>
+
+  <h3>What to point out</h3>
+  <ul style="margin-left:1.5rem;font-size:0.9rem;">
+    <li>Prior-auth badges appear on kanban cards &mdash; color-coded by status</li>
+    <li>Order approval is <strong>blocked at both frontend and backend</strong> when auth is pending/submitted/denied (409 Conflict)</li>
+    <li>Insurance type detection tries FHIR Coverage first, falls back to payer name heuristic</li>
+    <li>Auth data is denormalized from the order at creation &mdash; self-contained for reporting</li>
+    <li>No duplicate active auths per order &mdash; must resolve current auth before creating a new one</li>
+  </ul>
+</section>
+
+
+<!-- ────────────────────── INVENTORY ────────────────────── -->
+<section id="inventory">
+  <h2>Workflow 11: In-House Inventory <span class="badge badge-dme">DME + Admin</span></h2>
+  <p class="section-desc">Manage on-site stock levels for CPAP/BiPAP equipment and supplies. Products with size variants use dropdown selectors.</p>
+
+  <ol class="steps">
+    <li>
+      <strong>Switch to Inventory view</strong><br>
+      In DME Admin (<code>/dme/admin</code>), click the <strong>"Inventory"</strong> tab at the top of the page.
+    </li>
+    <li>
+      <strong>Review the summary cards</strong><br>
+      Three KPI cards at top: <strong>Total SKUs</strong>, <strong>Low Stock</strong> (amber, clickable filter), <strong>Out of Stock</strong> (red, clickable filter).
+    </li>
+    <li>
+      <strong>Browse the consolidated product list</strong><br>
+      Each product is one row, even those with multiple sizes. The table shows: product name, category badge, HCPCS code, size dropdown, quantity, reorder point, and status.
+    </li>
+    <li>
+      <strong>Use the size dropdown</strong><br>
+      For products like <strong>Full Face Mask</strong> (7 sizes: XS through XL), select a size from the dropdown. The quantity, reorder point, and status update to show that size's stock. The dropdown shows <code>(OUT)</code> or <code>(LOW)</code> indicators next to sizes that need attention.
+    </li>
+    <li>
+      <strong>Restock a product</strong><br>
+      Click <strong>"Restock"</strong> on any item, enter the quantity received, click <strong>"Add"</strong>.
+      <div class="endpoint"><span class="method m-post">POST</span> <code>/api/dme/inventory/{inventory_id}/restock</code></div>
+    </li>
+    <li>
+      <strong>Edit quantity / reorder point</strong><br>
+      Click <strong>"Edit"</strong> to adjust the current quantity or change the reorder threshold.
+      <div class="endpoint"><span class="method m-put">PUT</span> <code>/api/dme/inventory/{inventory_id}</code></div>
+    </li>
+    <li>
+      <strong>Filter by category or status</strong><br>
+      Use the category dropdown or click the Low Stock / Out of Stock summary cards to filter. Search by product name, HCPCS code, or size.
+    </li>
+  </ol>
+
+  <h3>Product Catalog (29 products)</h3>
+  <table>
+    <tr><th>Category</th><th>Products</th><th>Sizes?</th></tr>
+    <tr><td><span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;font-size:0.75rem;">Equipment</span></td><td>CPAP, BiPAP (w/ &amp; w/o backup), Humidifiers (heated &amp; non-heated)</td><td>No</td></tr>
+    <tr><td><span style="background:#e9d5ff;color:#6b21a8;padding:2px 6px;border-radius:4px;font-size:0.75rem;">Masks</span></td><td>Full Face, Nasal, Nasal Pillow, Oral, Oral/Nasal Combo</td><td>Yes (XS&ndash;XL)</td></tr>
+    <tr><td><span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:0.75rem;">Replacement Parts</span></td><td>Cushions (full face, nasal, oral/nasal), Nasal Pillows</td><td>Yes (XS&ndash;XL)</td></tr>
+    <tr><td><span style="background:#f3f4f6;color:#374151;padding:2px 6px;border-radius:4px;font-size:0.75rem;">Accessories</span></td><td>Tubing (heated, standard), Headgear, Chinstrap, Filters, Humidifier Chamber, Exhalation Port, Modem</td><td>Headgear only</td></tr>
+  </table>
+
+  <h3>What to point out</h3>
+  <ul style="margin-left:1.5rem;font-size:0.9rem;">
+    <li>Products are consolidated &mdash; one row per product instead of per-size, reducing visual clutter</li>
+    <li><strong>"(12 total)"</strong> badge next to product name shows aggregate stock across all sizes</li>
+    <li>Aggregate status line: "2 sizes out, 1 low" gives product-level overview without expanding each size</li>
+    <li>Vendor selection during ordering (In-House / PPM / VGM) ties into inventory &mdash; In-House orders draw from this stock</li>
+    <li>Products auto-seed on first startup &mdash; all 29 products with inventory rows (one per size variant)</li>
+  </ul>
+</section>
+
+
 <!-- ────────────────────── SETTINGS ────────────────────── -->
 <section id="settings">
-  <h2>Workflow 10: Settings <span class="badge badge-admin">Admin Only</span></h2>
+  <h2>Workflow 12: Settings <span class="badge badge-admin">Admin Only</span></h2>
   <p class="section-desc">View current EMR and LLM provider configuration.</p>
 
   <ol class="steps">
@@ -1033,7 +1161,7 @@ Prescription monitor initialized</code></pre>
 
 <!-- ────────────────────── USER MANAGEMENT ────────────────────── -->
 <section id="users">
-  <h2>Workflow 11: User Management & RBAC <span class="badge badge-admin">Admin Only</span></h2>
+  <h2>Workflow 13: User Management & RBAC <span class="badge badge-admin">Admin Only</span></h2>
   <p class="section-desc">Create users with role-based access. DME users only see DME-related features.</p>
 
   <ol class="steps">
@@ -1158,7 +1286,10 @@ Prescription monitor initialized</code></pre>
     <tr><td>Auth</td><td><code>POST /api/admin/login</code> &middot; <code>POST /api/admin/logout</code> &middot; <code>POST /api/admin/refresh</code></td></tr>
     <tr><td>Users</td><td><code>GET /api/admin/users</code> &middot; <code>POST /api/admin/users</code> &middot; <code>PUT /api/admin/users/{id}</code></td></tr>
     <tr><td>DME</td><td><code>GET|POST /api/dme/orders</code> &middot; <code>/approve</code> &middot; <code>/reject</code> &middot; <code>/hold</code> &middot; <code>/send-confirmation</code> &middot; <code>/mark-ordered</code> &middot; <code>/mark-shipped</code> &middot; <code>/fulfill</code></td></tr>
-    <tr><td>Patient Portal</td><td><code>GET|POST /api/dme/confirm/{token}</code> &middot; <code>POST /api/dme/patient-verify</code></td></tr>
+    <tr><td>Prior Auth</td><td><code>POST /api/dme/orders/{id}/prior-auth/check</code> &middot; <code>GET|POST /api/dme/orders/{id}/prior-auth</code> &middot; <code>PUT /api/dme/prior-auth/{id}</code> &middot; <code>GET /api/dme/prior-auth/pending</code> &middot; <code>/dashboard</code></td></tr>
+    <tr><td>Inventory</td><td><code>GET /api/dme/inventory</code> &middot; <code>PUT /api/dme/inventory/{id}</code> &middot; <code>POST /api/dme/inventory/{id}/restock</code> &middot; <code>GET /api/dme/inventory/low-stock</code></td></tr>
+    <tr><td>Products</td><td><code>GET /api/dme/products</code> &middot; <code>/categories</code> &middot; <code>GET /api/dme/vendors</code></td></tr>
+    <tr><td>Patient Portal</td><td><code>GET|POST /api/dme/confirm/{token}</code> &middot; <code>POST /api/dme/confirm/{token}/reject</code> &middot; <code>POST /api/dme/patient-verify</code></td></tr>
     <tr><td>Fax</td><td><code>GET /api/faxes/status</code> &middot; <code>POST /api/faxes/process</code></td></tr>
     <tr><td>Prescriptions</td><td><code>POST /api/prescriptions/poll</code> &middot; <code>GET /api/prescriptions</code> &middot; <code>GET /api/prescriptions/status</code></td></tr>
     <tr><td>Referral Auths</td><td><code>GET|POST /api/referral-auths</code> &middot; <code>/record-visit</code> &middot; <code>/request-renewal</code> &middot; <code>/renewal-content</code></td></tr>
