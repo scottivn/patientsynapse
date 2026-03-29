@@ -2,21 +2,25 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   Package, RefreshCw, ShieldCheck, ShieldAlert, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, AlertTriangle, Send, Copy, ExternalLink,
-  Inbox, Clock, RotateCcw, Activity, FileText, Truck, Store,
+  Inbox, Clock, Activity, FileText, Truck, Store,
   PauseCircle, Play, UserCheck, ShoppingCart, Archive, CalendarClock,
-  Pill, Search,
+  Pill, Search, Plus, X, Cpu, User, Warehouse,
 } from 'lucide-react'
 import ErrorBanner from '../components/ErrorBanner'
+import DMEInventory from '../components/DMEInventory'
 import {
-  listDMEOrders, getDMEDashboard, getDMEAutoReplaceDue,
-  getDMEIncoming, getDMEAutoRefillPending, getDMEInProgress,
+  listDMEOrders, getDMEDashboard,
+  getDMEIncoming, getDMEInProgress,
   getDMEAwaitingPatient, getDMEPatientConfirmed, getDMEOnHold,
   verifyDMEInsurance, approveDMEOrder, rejectDMEOrder, fulfillDMEOrder,
-  updateDMECompliance, holdDMEOrder, resumeDMEOrder,
+  updateDMECompliance, updateDMEEncounter, holdDMEOrder, resumeDMEOrder,
   sendDMEConfirmation, markDMEOrdered, markDMEShipped,
   pollPrescriptions, listPrescriptions,
   getDMEExpiringEncounters, processDMEAutoDeliveries,
   getDMEReceipt, getDMEDeliveryTicket,
+  searchDMEPatients, createAdminDMEOrder,
+  getDMEProducts, getDMEProductCategories, getDMEVendors,
+  checkDMEPriorAuth, createDMEPriorAuth, updateDMEPriorAuth, getDMEPriorAuthDashboard,
 } from '../services/api'
 
 const STATUS_STYLES = {
@@ -207,16 +211,108 @@ function EmptyState({ icon: Icon, message }) {
 
 // ── Modals ──────────────────────────────────────────────────────
 
+const REJECTION_REASONS = [
+  {
+    key: 'compliance',
+    label: 'Non-Compliant (CPAP Usage)',
+    message: 'Your DME supply order cannot be processed at this time because your CPAP compliance data does not meet the required threshold (minimum 4 hours per night on at least 70% of nights in a 30-day period). Please contact our office to discuss next steps and how to improve your usage to qualify for resupply.',
+  },
+  {
+    key: 'encounter',
+    label: 'Encounter Expired',
+    message: 'Your DME supply order cannot be processed at this time because your last provider encounter has expired. Insurance requires a recent office visit or telehealth appointment on file before we can fulfill supply orders. Please schedule a follow-up appointment with your provider and contact our office once completed.',
+  },
+  {
+    key: 'insurance',
+    label: 'Insurance Verification Failed',
+    message: 'Your DME supply order cannot be processed at this time because we were unable to verify your insurance coverage for this equipment. This may be due to a lapsed policy, a change in coverage, or missing authorization. Please contact our office to update your insurance information so we can reprocess your order.',
+  },
+  {
+    key: 'custom',
+    label: 'Other (custom reason)',
+    message: '',
+  },
+]
+
 function RejectModal({ onConfirm, onCancel }) {
-  const [reason, setReason] = useState('')
+  const [selected, setSelected] = useState('')
+  const [message, setMessage] = useState('')
+  const [sendNotification, setSendNotification] = useState(true)
+  const [sendVia, setSendVia] = useState('sms')
+
+  const handleSelect = (key) => {
+    setSelected(key)
+    const preset = REJECTION_REASONS.find(r => r.key === key)
+    if (preset && preset.message) setMessage(preset.message)
+    else if (key === 'custom') setMessage('')
+  }
+
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-gray-900">Reject Order</h3>
-        <textarea className="input resize-none w-full" rows={3} placeholder="Reason for rejection..." value={reason} onChange={e => setReason(e.target.value)} />
-        <div className="flex gap-2 justify-end">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-gray-900 text-lg">Reject Order</h3>
+
+        {/* Reason presets */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-2">Rejection Reason</label>
+          <div className="space-y-1.5">
+            {REJECTION_REASONS.map(r => (
+              <label key={r.key}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                  selected === r.key ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}>
+                <input type="radio" name="reject-reason" value={r.key} checked={selected === r.key}
+                  onChange={() => handleSelect(r.key)}
+                  className="text-red-600 focus:ring-red-500" />
+                <span className="text-sm font-medium text-gray-700">{r.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Editable message */}
+        {selected && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Message to Patient</label>
+            <textarea className="input resize-none w-full text-sm" rows={4} value={message}
+              onChange={e => setMessage(e.target.value)}
+              placeholder="Enter rejection message..." />
+            <p className="text-[10px] text-gray-400 mt-1">You can edit this message before sending.</p>
+          </div>
+        )}
+
+        {/* Send notification toggle */}
+        {selected && message && (
+          <div className="bg-gray-50 border rounded-lg px-3 py-2.5 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={sendNotification} onChange={e => setSendNotification(e.target.checked)}
+                className="rounded border-gray-300 text-red-600 focus:ring-red-500" />
+              <span className="text-sm font-medium text-gray-700">Send notification to patient</span>
+            </label>
+            {sendNotification && (
+              <div className="flex gap-2 ml-6">
+                {['sms', 'email'].map(method => (
+                  <label key={method} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer text-xs font-medium transition-colors ${
+                    sendVia === method ? 'bg-red-50 border-red-300 text-red-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}>
+                    <input type="radio" name="send-via" value={method} checked={sendVia === method}
+                      onChange={() => setSendVia(method)} className="sr-only" />
+                    {method === 'sms' ? 'SMS' : 'Email'}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2 justify-end pt-1">
           <button onClick={onCancel} className="btn-secondary text-sm">Cancel</button>
-          <button onClick={() => onConfirm(reason)} className="btn-primary text-sm bg-red-600 hover:bg-red-700">Reject</button>
+          <button
+            onClick={() => onConfirm(message, { sendNotification, sendVia })}
+            className="btn-primary text-sm bg-red-600 hover:bg-red-700"
+            disabled={!selected || !message.trim()}>
+            {sendNotification ? 'Reject & Notify Patient' : 'Reject Order'}
+          </button>
         </div>
       </div>
     </div>
@@ -246,18 +342,36 @@ function VendorModal({ onConfirm, onCancel }) {
   const [customVendor, setCustomVendor] = useState('')
   const [orderId, setOrderId] = useState('')
   const effectiveVendor = vendor === 'Other' ? `Other: ${customVendor}` : vendor
+  const portalUrl = VENDOR_PORTALS[vendor]
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
       <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
         <h3 className="font-semibold text-gray-900">Order from Vendor</h3>
-        <select className="input w-full" value={vendor} onChange={e => setVendor(e.target.value)}>
-          <option value="">Select vendor...</option>
-          {VENDOR_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Vendor</label>
+          <select className="input w-full" value={vendor} onChange={e => setVendor(e.target.value)}>
+            <option value="">Select vendor...</option>
+            {VENDOR_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
         {vendor === 'Other' && (
           <input className="input w-full" placeholder="Vendor name" value={customVendor} onChange={e => setCustomVendor(e.target.value)} />
         )}
-        <input className="input w-full" placeholder="Vendor order ID (optional)" value={orderId} onChange={e => setOrderId(e.target.value)} />
+        {portalUrl && (
+          <a href={portalUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-medium text-sm hover:bg-blue-100 transition-colors">
+            <ExternalLink size={14} /> Open {vendor} Portal
+          </a>
+        )}
+        {vendor === 'In-House' && (
+          <div className="text-xs text-gray-500 bg-gray-50 border rounded-lg px-3 py-2">
+            In-house fulfillment — no external portal needed.
+          </div>
+        )}
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Vendor Order ID {vendor === 'In-House' ? '(optional)' : ''}</label>
+          <input className="input w-full" placeholder="Enter order ID from vendor portal" value={orderId} onChange={e => setOrderId(e.target.value)} />
+        </div>
         <div className="flex gap-2 justify-end">
           <button onClick={onCancel} className="btn-secondary text-sm">Cancel</button>
           <button onClick={() => onConfirm(effectiveVendor, orderId)} className="btn-primary text-sm" disabled={!vendor || (vendor === 'Other' && !customVendor)}>Mark Ordered</button>
@@ -382,7 +496,7 @@ function OrderRow({ order, onAction }) {
     <>
       {modal === 'reject' && (
         <RejectModal
-          onConfirm={async (reason) => { setModal(null); await act(() => onAction('reject', order.id, reason)) }}
+          onConfirm={async (message, notifyOpts) => { setModal(null); await act(() => onAction('reject', order.id, message)) }}
           onCancel={() => setModal(null)}
         />
       )}
@@ -528,6 +642,9 @@ function OrderRow({ order, onAction }) {
               </div>
             )}
 
+            {/* Prior Authorization */}
+            <PriorAuthSection order={order} onRefresh={() => onAction('refresh')} />
+
             {/* Hold reason */}
             {order.hold_reason && (
               <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
@@ -578,35 +695,46 @@ function OrderRow({ order, onAction }) {
                 </button>
               )}
 
-              {/* Verify Insurance — pending or verified */}
-              {['pending', 'verified'].includes(order.status) && (
+              {/* Verify Insurance — new/review orders */}
+              {['pending', 'verified', 'approved'].includes(order.status) && (
                 <button disabled={busy} onClick={() => act(() => onAction('verify', order.id))}
                   className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 flex items-center gap-1.5 disabled:opacity-50">
                   <ShieldCheck size={13} /> Verify Insurance
                 </button>
               )}
 
-              {/* Approve — pending or verified */}
-              {['pending', 'verified'].includes(order.status) && (
-                <button disabled={busy} onClick={() => act(() => onAction('approve', order.id))}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1.5 disabled:opacity-50">
-                  <CheckCircle2 size={13} /> Approve
-                </button>
+              {/* Approve & Send to Patient — new/review orders (blocked if prior-auth is pending/denied) */}
+              {['pending', 'verified', 'approved'].includes(order.status) && (
+                order.prior_auth?.is_blocking ? (
+                  <span className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 flex items-center gap-1.5 cursor-not-allowed"
+                    title="Prior authorization required before approval">
+                    <ShieldAlert size={13} /> Auth Required
+                  </span>
+                ) : (
+                  <button disabled={busy} onClick={async () => {
+                    setBusy(true)
+                    try {
+                      if (order.status !== 'approved') await approveDMEOrder(order.id)
+                      const result = await sendDMEConfirmation(order.id, 'sms')
+                      setConfirmationUrl(result.confirmation_url)
+                      setModal('link')
+                      onAction('refresh')
+                    } catch (err) { onAction('error', null, err.message) } finally { setBusy(false) }
+                  }}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 flex items-center gap-1.5 disabled:opacity-50">
+                    <Send size={13} /> Approve & Send to Patient
+                  </button>
+                )
               )}
 
-              {/* Send confirmation to patient — approved */}
-              {order.status === 'approved' && (
-                <button disabled={busy} onClick={async () => {
-                  setBusy(true)
-                  try {
-                    const result = await sendDMEConfirmation(order.id, 'sms')
-                    setConfirmationUrl(result.confirmation_url)
-                    setModal('link')
-                    onAction('refresh')
-                  } catch (err) { onAction('error', null, err.message) } finally { setBusy(false) }
+              {/* View patient link — patient_contacted (token already generated) */}
+              {order.status === 'patient_contacted' && order.confirmation_token && (
+                <button onClick={() => {
+                  setConfirmationUrl(`${window.location.origin}/dme/confirm/${order.confirmation_token}`)
+                  setModal('link')
                 }}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-cyan-300 text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5 disabled:opacity-50">
-                  <Send size={13} /> Send to Patient
+                  className="text-xs px-3 py-1.5 rounded-lg border border-cyan-300 text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5">
+                  <ExternalLink size={13} /> Patient Link
                 </button>
               )}
 
@@ -692,11 +820,1157 @@ function OrderRow({ order, onAction }) {
 }
 
 
+// ── Equipment constants ──────────────────────────────────────────
+
+const REFILL_FREQUENCIES = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly (90 days)' },
+  { value: 'biannual', label: 'Every 6 months' },
+  { value: 'annual', label: 'Annual' },
+]
+
+const VENDOR_PORTALS = {
+  PPM: 'https://dev.ppmfulfillment.com/Login.aspx',
+  VGM: 'https://www.vgm.com/login/?returnURL=%2fportal%2f',
+}
+
+
+// ── Product Selection (shared between patient and newPatient steps) ──
+
+function ProductSelector({ form, setForm, products, categories }) {
+  const selectedProduct = products.find(p => p.id === form.product_id)
+  const categoryProducts = form.equipment_category
+    ? products.filter(p => p.category === form.equipment_category)
+    : []
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs font-medium text-gray-600">Category</label>
+        <select value={form.equipment_category} onChange={e => setForm(f => ({
+          ...f, equipment_category: e.target.value, product_id: '', size: '', equipment_description: '',
+        }))} className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+          <option value="">Select category...</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {form.equipment_category && (
+        <div>
+          <label className="text-xs font-medium text-gray-600">Product</label>
+          <select value={form.product_id || ''} onChange={e => {
+            const prod = products.find(p => p.id === e.target.value)
+            setForm(f => ({
+              ...f,
+              product_id: e.target.value,
+              equipment_description: prod ? `${prod.name} (${prod.hcpcs_code})` : '',
+              size: '',
+            }))
+          }} className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+            <option value="">Select product...</option>
+            {categoryProducts.map(p => (
+              <option key={p.id} value={p.id}>{p.name} — {p.hcpcs_code}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {selectedProduct?.has_sizes && selectedProduct.available_sizes?.length > 0 && (
+        <div>
+          <label className="text-xs font-medium text-gray-600">Size</label>
+          <select value={form.size || ''} onChange={e => setForm(f => ({ ...f, size: e.target.value }))}
+            className="w-full mt-1 px-3 py-2 border rounded-lg text-sm bg-white">
+            <option value="">Select size...</option>
+            {selectedProduct.available_sizes.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      )}
+
+      {selectedProduct && (
+        <div className="text-xs bg-gray-50 border rounded-lg p-2.5 space-y-1">
+          <p className="text-gray-500">{selectedProduct.description}</p>
+          <p className="text-gray-400">
+            HCPCS: <span className="font-mono">{selectedProduct.hcpcs_code}</span>
+            {selectedProduct.resupply_months && <> · Resupply: every {selectedProduct.resupply_months} mo</>}
+          </p>
+          {selectedProduct.vendors?.length > 0 && (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-gray-400">Order via:</span>
+              {selectedProduct.vendors.map(v => VENDOR_PORTALS[v] ? (
+                <a key={v} href={VENDOR_PORTALS[v]} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium">
+                  {v} <ExternalLink size={10} />
+                </a>
+              ) : (
+                <span key={v} className="text-gray-600 font-medium">{v}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── New Order Slide-Over Panel ──────────────────────────────────
+
+function NewOrderPanel({ open, onClose, onCreated }) {
+  const [step, setStep] = useState('search') // search | patient | form | newPatient
+  const [searchMode, setSearchMode] = useState('name') // name | mrn
+  const [searchFields, setSearchFields] = useState({ family: '', given: '', dob: '', mrn: '' })
+  const [searching, setSearching] = useState(false)
+  const [results, setResults] = useState(null)
+  const [selectedPatient, setSelectedPatient] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState(null)
+  const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [form, setForm] = useState({
+    equipment_category: '', equipment_description: '', product_id: '', size: '', quantity: 1,
+    diagnosis_code: '', diagnosis_description: '', referring_physician: '', referring_npi: '',
+    clinical_notes: '', auto_replace: false, auto_replace_frequency: 'quarterly',
+  })
+
+  // Load product catalog when panel opens
+  useEffect(() => {
+    if (open && products.length === 0) {
+      Promise.all([getDMEProducts(), getDMEProductCategories()])
+        .then(([prods, cats]) => { setProducts(prods); setCategories(cats) })
+        .catch(() => {})
+    }
+  }, [open, products.length])
+  // New patient fields (when creating from scratch)
+  const [newPatient, setNewPatient] = useState({
+    first_name: '', last_name: '', dob: '', phone: '', email: '',
+    address: '', city: '', state: '', zip: '',
+    insurance_payer: '', insurance_member_id: '', insurance_group: '',
+  })
+
+  const resetPanel = () => {
+    setStep('search')
+    setResults(null)
+    setSelectedPatient(null)
+    setError(null)
+    setSearchFields({ family: '', given: '', dob: '', mrn: '' })
+    setForm({ equipment_category: '', equipment_description: '', product_id: '', size: '', quantity: 1,
+      diagnosis_code: '', diagnosis_description: '', referring_physician: '', referring_npi: '',
+      clinical_notes: '', auto_replace: false, auto_replace_frequency: 'quarterly' })
+    setNewPatient({ first_name: '', last_name: '', dob: '', phone: '', email: '',
+      address: '', city: '', state: '', zip: '',
+      insurance_payer: '', insurance_member_id: '', insurance_group: '' })
+  }
+
+  const handleSearch = async () => {
+    setSearching(true)
+    setError(null)
+    try {
+      const params = searchMode === 'mrn'
+        ? { mrn: searchFields.mrn }
+        : { family: searchFields.family, given: searchFields.given, dob: searchFields.dob }
+      const data = await searchDMEPatients(params)
+      setResults(data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleSelectPatient = (patient) => {
+    setSelectedPatient(patient)
+    setStep('patient')
+  }
+
+  const handleSubmit = async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      const orderData = step === 'newPatient' ? {
+        patient_first_name: newPatient.first_name,
+        patient_last_name: newPatient.last_name,
+        patient_dob: newPatient.dob,
+        patient_phone: newPatient.phone,
+        patient_email: newPatient.email,
+        patient_address: newPatient.address,
+        patient_city: newPatient.city,
+        patient_state: newPatient.state,
+        patient_zip: newPatient.zip,
+        insurance_payer: newPatient.insurance_payer,
+        insurance_member_id: newPatient.insurance_member_id,
+        insurance_group: newPatient.insurance_group,
+        ...form,
+        origin: 'staff_initiated',
+      } : {
+        patient_first_name: selectedPatient.first_name,
+        patient_last_name: selectedPatient.last_name,
+        patient_dob: selectedPatient.dob,
+        patient_phone: selectedPatient.phone,
+        patient_email: selectedPatient.email || '',
+        patient_address: selectedPatient.address,
+        patient_city: selectedPatient.city,
+        patient_state: selectedPatient.state,
+        patient_zip: selectedPatient.zip,
+        patient_id: selectedPatient.patient_id,
+        insurance_payer: selectedPatient.insurance?.payer || '',
+        insurance_member_id: selectedPatient.insurance?.member_id || '',
+        insurance_group: selectedPatient.insurance?.group || '',
+        ...form,
+        origin: 'staff_initiated',
+      }
+      await createAdminDMEOrder(orderData)
+      resetPanel()
+      onClose()
+      onCreated()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={() => { resetPanel(); onClose() }} />
+
+      {/* Panel */}
+      <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b bg-gray-50">
+          <h2 className="text-lg font-bold text-gray-900">New DME Order</h2>
+          <button onClick={() => { resetPanel(); onClose() }} className="text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+        </div>
+
+        {error && <div className="px-5 pt-3"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {/* Step 1: Patient Search */}
+          {step === 'search' && (
+            <div className="space-y-4">
+              <div className="flex gap-2 mb-2">
+                <button onClick={() => setSearchMode('name')}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium ${searchMode === 'name' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  Name + DOB
+                </button>
+                <button onClick={() => setSearchMode('mrn')}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-medium ${searchMode === 'mrn' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  MRN
+                </button>
+              </div>
+
+              {searchMode === 'name' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Last Name</label>
+                    <input value={searchFields.family} onChange={e => setSearchFields(f => ({ ...f, family: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Garcia" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">First Name</label>
+                    <input value={searchFields.given} onChange={e => setSearchFields(f => ({ ...f, given: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Maria" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600">Date of Birth</label>
+                    <input type="date" value={searchFields.dob} onChange={e => setSearchFields(f => ({ ...f, dob: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-medium text-gray-600">MRN / Patient ID</label>
+                  <input value={searchFields.mrn} onChange={e => setSearchFields(f => ({ ...f, mrn: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="PT001" />
+                </div>
+              )}
+
+              <button onClick={handleSearch} disabled={searching || (searchMode === 'name' && !searchFields.family && !searchFields.given)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                {searching ? 'Searching EMR...' : 'Search Patients'}
+              </button>
+
+              {/* Results */}
+              {results && (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 font-medium">{results.length} patient{results.length !== 1 ? 's' : ''} found</p>
+                  {results.length === 0 && (
+                    <div className="text-center py-6 space-y-2">
+                      <p className="text-sm text-gray-500">No patients found in EMR</p>
+                      <button onClick={() => setStep('newPatient')} className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+                        + Create New Patient
+                      </button>
+                    </div>
+                  )}
+                  {results.map((p, i) => (
+                    <div key={i} onClick={() => handleSelectPatient(p)}
+                      className="border rounded-lg p-3 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-medium text-sm text-gray-900">{p.first_name} {p.last_name}</span>
+                          <span className="text-xs text-gray-400 ml-2">DOB: {p.dob}</span>
+                        </div>
+                        <span className="text-xs text-gray-400">ID: {p.patient_id}</span>
+                      </div>
+                      {p.insurance?.payer && (
+                        <p className="text-xs text-gray-500 mt-1">Insurance: {p.insurance.payer}</p>
+                      )}
+                      {p.devices?.length > 0 && (
+                        <p className="text-xs text-purple-600 mt-1">
+                          <Cpu size={10} className="inline mr-1" />
+                          {p.devices.map(d => `${d.manufacturer} ${d.model}`).join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {results.length > 0 && (
+                    <button onClick={() => setStep('newPatient')} className="text-xs text-blue-600 hover:text-blue-700 font-medium mt-2">
+                      Patient not listed? Create New Patient
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 2: Patient Selected — show details + create order */}
+          {step === 'patient' && selectedPatient && (
+            <div className="space-y-4">
+              <button onClick={() => setStep('search')} className="text-xs text-blue-600 hover:text-blue-700">← Back to search</button>
+
+              {/* Patient card */}
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <div className="flex items-center gap-2 mb-2">
+                  <User size={16} className="text-gray-500" />
+                  <span className="font-semibold text-gray-900">{selectedPatient.first_name} {selectedPatient.last_name}</span>
+                  <span className="text-xs text-gray-400">#{selectedPatient.patient_id}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
+                  <span>DOB: {selectedPatient.dob}</span>
+                  <span>Phone: {selectedPatient.phone || '—'}</span>
+                  <span className="col-span-2">Address: {[selectedPatient.address, selectedPatient.city, selectedPatient.state, selectedPatient.zip].filter(Boolean).join(', ') || '—'}</span>
+                </div>
+                {selectedPatient.insurance?.payer && (
+                  <div className="mt-2 text-xs">
+                    <span className="font-medium text-gray-700">Insurance: </span>
+                    <span className="text-gray-600">{selectedPatient.insurance.payer}</span>
+                    {selectedPatient.insurance.member_id && <span className="text-gray-400 ml-2">ID: {selectedPatient.insurance.member_id}</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Devices */}
+              {selectedPatient.devices?.length > 0 && (
+                <div className="border rounded-lg p-3">
+                  <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1"><Cpu size={12} /> Current Equipment</h4>
+                  <div className="space-y-1.5">
+                    {selectedPatient.devices.map((d, i) => (
+                      <div key={i} className="text-xs text-gray-600 flex items-start gap-2">
+                        <span className="text-purple-500">•</span>
+                        <div>
+                          <span className="font-medium">{d.type}</span>
+                          {d.manufacturer && <span className="text-gray-400"> — {d.manufacturer} {d.model}</span>}
+                          {d.notes && <p className="text-gray-400 mt-0.5">{d.notes}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent orders */}
+              {selectedPatient.recent_orders?.length > 0 && (
+                <div className="border rounded-lg p-3">
+                  <h4 className="text-xs font-semibold text-gray-700 mb-2">Recent DME Orders</h4>
+                  <div className="space-y-1">
+                    {selectedPatient.recent_orders.slice(0, 5).map(o => (
+                      <div key={o.id} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600">#{o.id} — {o.equipment_description || o.equipment_category}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          o.status === 'fulfilled' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'
+                        }`}>{o.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Order form */}
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-900">Create Order</h4>
+
+                <ProductSelector form={form} setForm={setForm} products={products} categories={categories} />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Diagnosis Code</label>
+                    <input value={form.diagnosis_code} onChange={e => setForm(f => ({ ...f, diagnosis_code: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="G47.33" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Diagnosis</label>
+                    <input value={form.diagnosis_description} onChange={e => setForm(f => ({ ...f, diagnosis_description: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Obstructive Sleep Apnea" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Referring Physician</label>
+                    <input value={form.referring_physician} onChange={e => setForm(f => ({ ...f, referring_physician: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Dr. Reyes" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">NPI</label>
+                    <input value={form.referring_npi} onChange={e => setForm(f => ({ ...f, referring_npi: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="1234567890" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Notes</label>
+                  <textarea value={form.clinical_notes} onChange={e => setForm(f => ({ ...f, clinical_notes: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="e.g., patient requested different mask size" />
+                </div>
+
+                {/* Auto-refill toggle */}
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={form.auto_replace}
+                      onChange={e => setForm(f => ({ ...f, auto_replace: e.target.checked }))}
+                      className="rounded border-purple-300 text-purple-600 focus:ring-purple-500" />
+                    <span className="text-sm font-medium text-purple-800">Auto-Refill</span>
+                  </label>
+                  {form.auto_replace && (
+                    <select value={form.auto_replace_frequency}
+                      onChange={e => setForm(f => ({ ...f, auto_replace_frequency: e.target.value }))}
+                      className="w-full px-3 py-1.5 border border-purple-200 rounded-lg text-sm bg-white">
+                      {REFILL_FREQUENCIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* New patient form (no EMR match) */}
+          {step === 'newPatient' && (
+            <div className="space-y-4">
+              <button onClick={() => setStep('search')} className="text-xs text-blue-600 hover:text-blue-700">← Back to search</button>
+
+              <h4 className="text-sm font-semibold text-gray-900">New Patient</h4>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">First Name *</label>
+                  <input value={newPatient.first_name} onChange={e => setNewPatient(p => ({ ...p, first_name: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Last Name *</label>
+                  <input value={newPatient.last_name} onChange={e => setNewPatient(p => ({ ...p, last_name: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Date of Birth</label>
+                  <input type="date" value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Phone</label>
+                  <input value={newPatient.phone} onChange={e => setNewPatient(p => ({ ...p, phone: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="(210) 555-0100" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs font-medium text-gray-600">Email</label>
+                  <input type="email" value={newPatient.email} onChange={e => setNewPatient(p => ({ ...p, email: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Address</label>
+                  <input value={newPatient.address} onChange={e => setNewPatient(p => ({ ...p, address: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">City</label>
+                    <input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">State</label>
+                    <input value={newPatient.state} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" maxLength={2} placeholder="TX" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">ZIP</label>
+                    <input value={newPatient.zip} onChange={e => setNewPatient(p => ({ ...p, zip: e.target.value }))}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" maxLength={10} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Insurance</label>
+                  <input value={newPatient.insurance_payer} onChange={e => setNewPatient(p => ({ ...p, insurance_payer: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="Aetna" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Member ID</label>
+                  <input value={newPatient.insurance_member_id} onChange={e => setNewPatient(p => ({ ...p, insurance_member_id: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Group</label>
+                  <input value={newPatient.insurance_group} onChange={e => setNewPatient(p => ({ ...p, insurance_group: e.target.value }))}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" />
+                </div>
+              </div>
+
+              {/* Same order form as the patient step */}
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="text-sm font-semibold text-gray-900">Order Details</h4>
+                <ProductSelector form={form} setForm={setForm} products={products} categories={categories} />
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={form.auto_replace}
+                      onChange={e => setForm(f => ({ ...f, auto_replace: e.target.checked }))}
+                      className="rounded border-purple-300 text-purple-600 focus:ring-purple-500" />
+                    <span className="text-sm font-medium text-purple-800">Auto-Refill</span>
+                  </label>
+                  {form.auto_replace && (
+                    <select value={form.auto_replace_frequency}
+                      onChange={e => setForm(f => ({ ...f, auto_replace_frequency: e.target.value }))}
+                      className="w-full px-3 py-1.5 border border-purple-200 rounded-lg text-sm bg-white">
+                      {REFILL_FREQUENCIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer — Create button */}
+        {(step === 'patient' || step === 'newPatient') && (
+          <div className="border-t px-5 py-4 bg-gray-50">
+            <button onClick={handleSubmit} disabled={creating || (!form.equipment_category && !form.equipment_description) ||
+              (step === 'newPatient' && (!newPatient.first_name || !newPatient.last_name))}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              {creating ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+              {creating ? 'Creating Order...' : 'Create Order'}
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+
+// ── Kanban Board ─────────────────────────────────────────────────
+
+const KANBAN_COLUMNS = [
+  { key: 'new',       label: 'New / Review',     statuses: ['pending', 'verified', 'approved'], icon: Inbox, color: 'amber',   headerBg: 'bg-amber-50',   headerText: 'text-amber-700',   borderColor: 'border-amber-200' },
+  { key: 'awaiting',  label: 'Awaiting Patient', statuses: ['patient_contacted'],      icon: UserCheck,    color: 'cyan',    headerBg: 'bg-cyan-50',    headerText: 'text-cyan-700',    borderColor: 'border-cyan-200' },
+  { key: 'confirmed', label: 'Confirmed',        statuses: ['patient_confirmed'],      icon: ShoppingCart, color: 'emerald', headerBg: 'bg-emerald-50', headerText: 'text-emerald-700', borderColor: 'border-emerald-200' },
+  { key: 'ordering',  label: 'Ordering',         statuses: ['ordering'],               icon: Store,        color: 'blue',    headerBg: 'bg-blue-50',    headerText: 'text-blue-700',    borderColor: 'border-blue-200' },
+  { key: 'shipped',   label: 'Shipped',          statuses: ['shipped'],                icon: Truck,        color: 'indigo',  headerBg: 'bg-indigo-50',  headerText: 'text-indigo-700',  borderColor: 'border-indigo-200' },
+]
+
+// ── Prior Auth section for OrderDetailModal ──
+
+const PA_STATUS_STYLES = {
+  pending:      'bg-amber-50 border-amber-200 text-amber-700',
+  submitted:    'bg-blue-50 border-blue-200 text-blue-700',
+  approved:     'bg-green-50 border-green-200 text-green-700',
+  denied:       'bg-red-50 border-red-200 text-red-700',
+  expired:      'bg-orange-50 border-orange-200 text-orange-700',
+  not_required: 'bg-gray-50 border-gray-200 text-gray-500',
+}
+
+function PriorAuthSection({ order, onRefresh }) {
+  const [checking, setChecking] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [checkResult, setCheckResult] = useState(null)
+  const [authAction, setAuthAction] = useState(null) // 'submit' | 'approve' | 'deny'
+  const [formData, setFormData] = useState({ auth_number: '', valid_until: '', denial_reason: '', submission_notes: '' })
+  const [error, setError] = useState(null)
+
+  const pa = order.prior_auth
+
+  const handleCheck = async () => {
+    setChecking(true); setError(null)
+    try {
+      const result = await checkDMEPriorAuth(order.id)
+      setCheckResult(result)
+    } catch (e) { setError(e.message) }
+    finally { setChecking(false) }
+  }
+
+  const handleCreate = async () => {
+    setCreating(true); setError(null)
+    try {
+      await createDMEPriorAuth(order.id)
+      onRefresh()
+    } catch (e) { setError(e.message) }
+    finally { setCreating(false) }
+  }
+
+  const handleSubmitAction = async () => {
+    setActionBusy(true); setError(null)
+    try {
+      const body = { action: authAction }
+      if (authAction === 'submit') body.submission_notes = formData.submission_notes
+      if (authAction === 'approve') { body.auth_number = formData.auth_number; body.valid_until = formData.valid_until }
+      if (authAction === 'deny') body.denial_reason = formData.denial_reason
+      await updateDMEPriorAuth(pa.id, body)
+      setAuthAction(null)
+      onRefresh()
+    } catch (e) { setError(e.message) }
+    finally { setActionBusy(false) }
+  }
+
+  // Don't show for fulfilled/cancelled/rejected orders
+  if (['fulfilled', 'cancelled', 'rejected'].includes(order.status)) return null
+
+  return (
+    <div className="rounded-lg border px-3 py-2 text-xs space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-gray-700 flex items-center gap-1.5">
+          <ShieldCheck size={13} /> Prior Authorization
+        </span>
+        {!pa && (
+          <button onClick={handleCheck} disabled={checking}
+            className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50">
+            {checking ? 'Checking...' : 'Check if Required'}
+          </button>
+        )}
+      </div>
+
+      {error && <div className="text-red-600 text-xs">{error}</div>}
+
+      {/* Check result (before auth request is created) */}
+      {checkResult && !pa && (
+        <div className={`rounded px-2 py-1.5 border ${checkResult.required ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+          <p className="font-medium">{checkResult.required ? 'Prior Auth Required' : 'Not Required'}</p>
+          <p className="text-gray-600 mt-0.5">{checkResult.reason}</p>
+          {checkResult.required && (
+            <button onClick={handleCreate} disabled={creating}
+              className="mt-1.5 bg-amber-600 text-white px-3 py-1 rounded text-xs hover:bg-amber-700 disabled:opacity-50">
+              {creating ? 'Creating...' : 'Create Auth Request'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Active prior-auth request */}
+      {pa && (
+        <div className={`rounded px-2 py-1.5 border ${PA_STATUS_STYLES[pa.status] || 'bg-gray-50 border-gray-200'}`}>
+          <div className="flex items-center justify-between">
+            <span className="font-medium capitalize">{pa.status.replace('_', ' ')}</span>
+            {pa.auth_number && <span className="text-gray-500">Auth #: {pa.auth_number}</span>}
+          </div>
+          {pa.valid_until && <p className="mt-0.5">Valid until: {pa.valid_until}{pa.days_until_expiry != null && ` (${pa.days_until_expiry}d)`}</p>}
+          {pa.denial_reason && <p className="mt-0.5">Denied: {pa.denial_reason}</p>}
+          {pa.submission_notes && <p className="mt-0.5 text-gray-500">Notes: {pa.submission_notes}</p>}
+          {pa.hcpcs_codes?.length > 0 && <p className="mt-0.5 text-gray-500">HCPCS: {pa.hcpcs_codes.join(', ')}</p>}
+          {pa.diagnosis_codes?.length > 0 && <p className="mt-0.5 text-gray-500">Dx: {pa.diagnosis_codes.join(', ')}</p>}
+
+          {/* Action buttons */}
+          <div className="flex gap-1.5 mt-2">
+            {pa.status === 'pending' && (
+              <button onClick={() => setAuthAction('submit')} className="bg-blue-600 text-white px-2.5 py-1 rounded text-xs hover:bg-blue-700">
+                Mark Submitted
+              </button>
+            )}
+            {(pa.status === 'pending' || pa.status === 'submitted') && (
+              <>
+                <button onClick={() => setAuthAction('approve')} className="bg-green-600 text-white px-2.5 py-1 rounded text-xs hover:bg-green-700">
+                  Record Approval
+                </button>
+                <button onClick={() => setAuthAction('deny')} className="bg-red-600 text-white px-2.5 py-1 rounded text-xs hover:bg-red-700">
+                  Record Denial
+                </button>
+              </>
+            )}
+            {(pa.status === 'denied' || pa.status === 'expired') && (
+              <button onClick={handleCreate} disabled={creating} className="bg-amber-600 text-white px-2.5 py-1 rounded text-xs hover:bg-amber-700 disabled:opacity-50">
+                {creating ? 'Creating...' : 'Resubmit New Request'}
+              </button>
+            )}
+          </div>
+
+          {/* Inline action form */}
+          {authAction && (
+            <div className="mt-2 bg-white rounded border p-2 space-y-1.5">
+              <p className="font-medium text-gray-800 capitalize">{authAction === 'submit' ? 'Submit to Payer' : authAction === 'approve' ? 'Record Approval' : 'Record Denial'}</p>
+              {authAction === 'submit' && (
+                <textarea rows={2} placeholder="Submission notes (optional)"
+                  value={formData.submission_notes} onChange={e => setFormData(f => ({ ...f, submission_notes: e.target.value }))}
+                  className="w-full border rounded px-2 py-1 text-xs" />
+              )}
+              {authAction === 'approve' && (
+                <>
+                  <input type="text" placeholder="Auth number" value={formData.auth_number}
+                    onChange={e => setFormData(f => ({ ...f, auth_number: e.target.value }))}
+                    className="w-full border rounded px-2 py-1 text-xs" />
+                  <input type="date" placeholder="Valid until" value={formData.valid_until}
+                    onChange={e => setFormData(f => ({ ...f, valid_until: e.target.value }))}
+                    className="w-full border rounded px-2 py-1 text-xs" />
+                </>
+              )}
+              {authAction === 'deny' && (
+                <textarea rows={2} placeholder="Denial reason"
+                  value={formData.denial_reason} onChange={e => setFormData(f => ({ ...f, denial_reason: e.target.value }))}
+                  className="w-full border rounded px-2 py-1 text-xs" />
+              )}
+              <div className="flex gap-1.5">
+                <button onClick={handleSubmitAction} disabled={actionBusy}
+                  className="bg-gray-800 text-white px-3 py-1 rounded text-xs hover:bg-gray-900 disabled:opacity-50">
+                  {actionBusy ? 'Saving...' : 'Confirm'}
+                </button>
+                <button onClick={() => setAuthAction(null)} className="text-gray-500 hover:text-gray-700 text-xs px-2">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* No auth and no check done yet */}
+      {!pa && !checkResult && (
+        <p className="text-gray-400">Click "Check if Required" to evaluate prior-auth needs</p>
+      )}
+    </div>
+  )
+}
+
+const CARD_ACTIONS = {
+  pending:           { label: 'Send to Patient',  icon: Send,         action: 'approve-and-send', style: 'bg-cyan-600 hover:bg-cyan-700 text-white' },
+  verified:          { label: 'Send to Patient',  icon: Send,         action: 'approve-and-send', style: 'bg-cyan-600 hover:bg-cyan-700 text-white' },
+  approved:          { label: 'Send to Patient',  icon: Send,         action: 'approve-and-send', style: 'bg-cyan-600 hover:bg-cyan-700 text-white' },
+  patient_contacted: null, // waiting on patient — no primary action
+  patient_confirmed: { label: 'Order',            icon: ShoppingCart, action: 'vendor',           style: 'bg-blue-600 hover:bg-blue-700 text-white' },
+  ordering:          { label: 'Mark Shipped',     icon: Truck,        action: 'ship',             style: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+  shipped:           { label: 'Delivered',        icon: Package,      action: 'fulfill',          style: 'bg-green-600 hover:bg-green-700 text-white' },
+}
+
+function KanbanCard({ order, onAction, onSelect }) {
+  const [busy, setBusy] = useState(false)
+  const originLabel = ORIGIN_LABEL[order.origin] || order.origin
+  const originStyle = ORIGIN_STYLE[order.origin] || 'bg-gray-50 text-gray-500 border-gray-200'
+  const cardAction = CARD_ACTIONS[order.status]
+  const ActionIcon = cardAction?.icon
+
+  const daysOld = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86400000)
+
+  const handlePrimary = async (e) => {
+    e.stopPropagation()
+    if (!cardAction) return
+    setBusy(true)
+    try {
+      if (['vendor', 'ship', 'approve-and-send'].includes(cardAction.action)) {
+        // These need modals or multi-step — open the detail view
+        onSelect(order)
+      } else {
+        await onAction(cardAction.action, order.id)
+      }
+    } catch (err) {
+      onAction('error', null, err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all group"
+      onClick={() => onSelect(order)}
+    >
+      {/* Patient name + age */}
+      <div className="flex items-start justify-between gap-1 mb-1.5">
+        <span className="font-semibold text-sm text-gray-900 truncate">
+          {order.patient_first_name} {order.patient_last_name}
+        </span>
+        {daysOld > 0 && (
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
+            daysOld > 7 ? 'bg-red-100 text-red-600' : daysOld > 3 ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'
+          }`}>
+            {daysOld}d
+          </span>
+        )}
+      </div>
+
+      {/* Equipment */}
+      <p className="text-xs text-gray-600 truncate mb-2">
+        {order.equipment_description || order.equipment_category || 'DME Order'}
+      </p>
+
+      {/* Badges row */}
+      <div className="flex items-center gap-1 flex-wrap mb-2">
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${originStyle}`}>
+          {originLabel}
+        </span>
+        {order.auto_replace && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-purple-50 text-purple-600 border-purple-200">
+            Auto-Refill
+          </span>
+        )}
+        {order.insurance_verified === true && (
+          <ShieldCheck size={11} className="text-green-500" />
+        )}
+        {order.compliance_status === 'compliant' && (
+          <Activity size={11} className="text-green-500" />
+        )}
+        {order.compliance_status === 'non_compliant' && (
+          <Activity size={11} className="text-red-500" />
+        )}
+        {!order.encounter_current && order.last_encounter_date && (
+          <CalendarClock size={11} className="text-red-500" title="Encounter expired" />
+        )}
+        {/* Prior-auth badges */}
+        {order.prior_auth?.status === 'pending' && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-amber-50 text-amber-600 border-amber-200">Auth Pending</span>
+        )}
+        {order.prior_auth?.status === 'submitted' && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-blue-50 text-blue-600 border-blue-200">Auth Submitted</span>
+        )}
+        {order.prior_auth?.status === 'approved' && (
+          <ShieldCheck size={11} className="text-emerald-500" title={`Prior Auth Approved: ${order.prior_auth.auth_number || ''}`} />
+        )}
+        {order.prior_auth?.status === 'denied' && (
+          <ShieldAlert size={11} className="text-red-500" title={`Prior Auth Denied: ${order.prior_auth.denial_reason || ''}`} />
+        )}
+        {order.prior_auth?.status === 'expired' && (
+          <ShieldAlert size={11} className="text-orange-500" title="Prior Auth Expired" />
+        )}
+      </div>
+
+      {/* Primary action button — blocked if prior-auth is pending/submitted/denied */}
+      {cardAction && order.prior_auth?.is_blocking ? (
+        <button
+          disabled
+          className="w-full text-xs font-medium py-1.5 rounded flex items-center justify-center gap-1.5 bg-gray-100 text-gray-400 cursor-not-allowed"
+          title="Prior authorization required before approval"
+        >
+          <ShieldAlert size={11} /> Auth Required
+        </button>
+      ) : cardAction && (
+        <button
+          disabled={busy}
+          onClick={handlePrimary}
+          className={`w-full text-xs font-medium py-1.5 rounded flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${cardAction.style}`}
+        >
+          {busy ? <RefreshCw size={11} className="animate-spin" /> : <ActionIcon size={11} />}
+          {cardAction.label}
+        </button>
+      )}
+      {!cardAction && order.status === 'patient_contacted' && order.confirmation_token && (
+        <button
+          onClick={(e) => { e.stopPropagation(); window.open(`/dme/confirm/${order.confirmation_token}`, '_blank') }}
+          className="w-full text-xs font-medium py-1.5 rounded flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+        >
+          <ExternalLink size={11} /> View Patient Page
+        </button>
+      )}
+    </div>
+  )
+}
+
+function OrderDetailModal({ order, onAction, onClose }) {
+  const [busy, setBusy] = useState(false)
+  const [modal, setModal] = useState(null)
+  const [confirmationUrl, setConfirmationUrl] = useState('')
+
+  const act = async (fn) => {
+    setBusy(true)
+    try { await fn() } finally { setBusy(false) }
+  }
+
+  if (!order) return null
+
+  const statusStyle = STATUS_STYLES[order.status] || 'bg-gray-100 text-gray-600'
+  const originLabel = ORIGIN_LABEL[order.origin] || order.origin
+  const originStyle = ORIGIN_STYLE[order.origin] || 'bg-gray-50 text-gray-500 border-gray-200'
+
+  return (
+    <>
+      {modal === 'reject' && (
+        <RejectModal
+          onConfirm={async (message, notifyOpts) => { setModal(null); await act(() => onAction('reject', order.id, message)) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'hold' && (
+        <HoldModal
+          onConfirm={async (reason) => { setModal(null); await act(() => onAction('hold', order.id, reason)) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'vendor' && (
+        <VendorModal
+          onConfirm={async (v, oid) => { setModal(null); await act(() => onAction('mark-ordered', order.id, { vendor: v, orderId: oid })) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'ship' && (
+        <ShipModal
+          isPickup={order.fulfillment_method === 'pickup'}
+          onConfirm={async (t, c, d) => { setModal(null); await act(() => onAction('mark-shipped', order.id, { tracking: t, carrier: c, date: d })) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'link' && (
+        <ConfirmationLinkModal url={confirmationUrl} onClose={() => setModal(null)} />
+      )}
+      {modal === 'encounter' && (
+        <EncounterModal
+          order={order}
+          onConfirm={async (date, type, provider, npi) => {
+            setModal(null)
+            await act(() => onAction('update-encounter', order.id, { date, type, provider, npi }))
+          }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'compliance' && (
+        <ComplianceModal
+          order={order}
+          onConfirm={async (data) => {
+            setModal(null)
+            await act(() => onAction('check-compliance', order.id, data))
+          }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+
+      <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-40" onClick={onClose}>
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          {/* Header */}
+          <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between z-10 rounded-t-2xl">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h2 className="text-lg font-bold text-gray-900">{order.patient_first_name} {order.patient_last_name}</h2>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusStyle}`}>{STATUS_LABEL[order.status] || order.status}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${originStyle}`}>{originLabel}</span>
+              <ComplianceBadge order={order} />
+              <EncounterBadge order={order} />
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600">
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Body — reuses OrderRow detail content */}
+          <div className="px-5 py-4 space-y-4">
+            <p className="text-sm text-gray-500">
+              {order.equipment_category}{order.equipment_description ? ` — ${order.equipment_description}` : ''}
+              {' · '}#{order.id}{' · '}{new Date(order.created_at).toLocaleDateString()}
+            </p>
+
+            {/* Patient + Insurance details */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+              <DetailItem label="DOB" value={order.patient_dob || '—'} />
+              <DetailItem label="Phone" value={order.patient_phone || '—'} />
+              <DetailItem label="Email" value={order.patient_email || '—'} />
+              <DetailItem label="Address" value={[order.patient_address, order.patient_city, order.patient_state, order.patient_zip].filter(Boolean).join(', ') || '—'} />
+              <DetailItem label="Insurance" value={order.insurance_payer || '—'} />
+              <DetailItem label="Member ID" value={order.insurance_member_id || '—'} />
+              <DetailItem label="Diagnosis" value={order.diagnosis_code ? `${order.diagnosis_code} — ${order.diagnosis_description}` : '—'} />
+              <DetailItem label="Referring Physician" value={order.referring_physician || '—'} />
+              <DetailItem label="HCPCS Codes" value={order.hcpcs_codes?.join(', ') || '—'} />
+              {order.expected_reimbursement != null && (
+                <DetailItem label="Expected Reimbursement" value={`$${order.expected_reimbursement.toFixed(2)}`} />
+              )}
+              {order.fulfillment_method !== 'not_selected' && (
+                <DetailItem label="Fulfillment" value={order.fulfillment_method === 'ship' ? 'Ship to patient' : 'Office pickup'} />
+              )}
+              {order.vendor_name && <DetailItem label="Vendor" value={`${order.vendor_name} (${order.vendor_order_id || 'no order #'})`} />}
+              {order.shipping_tracking_number && <DetailItem label="Tracking" value={`${order.shipping_carrier || ''} ${order.shipping_tracking_number}`} />}
+            </div>
+
+            {/* Info cards */}
+            {order.compliance_status !== 'unknown' && order.compliance_status !== 'not_applicable' && (
+              <div className={`rounded-lg px-3 py-2 text-xs border flex items-start gap-2 ${COMPLIANCE_STYLES[order.compliance_status]}`}>
+                <Activity size={14} className="mt-0.5" />
+                <div>
+                  <span className="font-medium">{COMPLIANCE_LABEL[order.compliance_status]}</span>
+                  {order.compliance_avg_hours != null && <span> — Avg {order.compliance_avg_hours.toFixed(1)} hrs/night</span>}
+                  {order.compliance_days_met != null && order.compliance_total_days != null && (
+                    <span> · {order.compliance_days_met}/{order.compliance_total_days} days ≥4hrs</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {order.last_encounter_date && (
+              <div className={`rounded-lg px-3 py-2 text-xs border flex items-start gap-2 ${
+                order.encounter_current ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-red-50 border-red-200 text-red-700'
+              }`}>
+                <CalendarClock size={14} className="mt-0.5" />
+                <div>
+                  <span className="font-medium">Last Encounter: </span>
+                  {ENCOUNTER_TYPE_LABELS[order.last_encounter_type] || order.last_encounter_type}
+                  {' on '}{new Date(order.last_encounter_date + 'T00:00:00').toLocaleDateString()}
+                  {order.last_encounter_provider && <span> with {order.last_encounter_provider}</span>}
+                </div>
+              </div>
+            )}
+            {!order.last_encounter_date && (
+              <div className="rounded-lg px-3 py-2 text-xs border flex items-start gap-2 bg-red-50 border-red-200 text-red-700">
+                <CalendarClock size={14} className="mt-0.5" />
+                <span><span className="font-medium">No encounter on file</span> — patient needs a provider visit</span>
+              </div>
+            )}
+
+            {order.insurance_notes && (
+              <div className={`rounded-lg px-3 py-2 text-xs border flex items-start gap-2 ${
+                order.insurance_verified === true ? 'bg-green-50 border-green-200 text-green-700'
+                : order.insurance_verified === false ? 'bg-red-50 border-red-200 text-red-700'
+                : 'bg-yellow-50 border-yellow-200 text-yellow-700'
+              }`}>
+                {order.insurance_verified === true ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+                <span>{order.insurance_notes}</span>
+              </div>
+            )}
+
+            {order.hold_reason && (
+              <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                <span className="font-medium">On hold: </span>{order.hold_reason}
+              </div>
+            )}
+            {order.patient_notes && (
+              <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                <span className="font-medium">Patient notes: </span>{order.patient_notes}
+              </div>
+            )}
+            {order.rejection_reason && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                <span className="font-medium">Rejected: </span>{order.rejection_reason}
+              </div>
+            )}
+            {order.patient_rejected && (
+              <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                <span className="font-medium">Patient flagged issue: </span>{order.patient_rejection_reason || 'No details provided'}
+                {order.patient_callback_requested && (
+                  <span className="ml-2 font-medium text-orange-800">— Callback requested</span>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-2 pt-2 border-t">
+              {!['rejected', 'fulfilled', 'cancelled'].includes(order.status) && (
+                <>
+                  <button disabled={busy} onClick={() => setModal('compliance')}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-purple-300 text-purple-700 hover:bg-purple-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <Activity size={13} /> Check Compliance
+                  </button>
+                  <button disabled={busy} onClick={() => setModal('encounter')}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <CalendarClock size={13} /> Update Encounter
+                  </button>
+                </>
+              )}
+              {['pending', 'verified', 'approved'].includes(order.status) && (
+                <>
+                  <button disabled={busy} onClick={() => act(() => onAction('verify', order.id))}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <ShieldCheck size={13} /> Verify Insurance
+                  </button>
+                  {order.prior_auth?.is_blocking ? (
+                    <span className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 flex items-center gap-1.5 cursor-not-allowed"
+                      title="Prior authorization required before approval">
+                      <ShieldAlert size={13} /> Auth Required
+                    </span>
+                  ) : (
+                    <button disabled={busy} onClick={async () => {
+                      setBusy(true)
+                      try {
+                        if (order.status !== 'approved') await approveDMEOrder(order.id)
+                        const result = await sendDMEConfirmation(order.id, 'sms')
+                        setConfirmationUrl(result.confirmation_url)
+                        setModal('link')
+                        onAction('refresh')
+                      } catch (err) { onAction('error', null, err.message) } finally { setBusy(false) }
+                    }}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 flex items-center gap-1.5 disabled:opacity-50">
+                      <Send size={13} /> Approve & Send to Patient
+                    </button>
+                  )}
+                </>
+              )}
+              {order.status === 'patient_contacted' && order.confirmation_token && (
+                <button onClick={() => {
+                  setConfirmationUrl(`${window.location.origin}/dme/confirm/${order.confirmation_token}`)
+                  setModal('link')
+                }}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-cyan-300 text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5">
+                  <ExternalLink size={13} /> Patient Link
+                </button>
+              )}
+              {order.status === 'patient_confirmed' && (
+                <button disabled={busy} onClick={() => setModal('vendor')}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-50">
+                  <ShoppingCart size={13} /> Order from Vendor
+                </button>
+              )}
+              {order.status === 'ordering' && (
+                <button disabled={busy} onClick={() => setModal('ship')}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5 disabled:opacity-50">
+                  {order.fulfillment_method === 'pickup' ? <Store size={13} /> : <Truck size={13} />}
+                  {order.fulfillment_method === 'pickup' ? 'Ready for Pickup' : 'Mark Shipped'}
+                </button>
+              )}
+              {order.status === 'shipped' && (
+                <button disabled={busy} onClick={() => act(() => onAction('fulfill', order.id))}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 flex items-center gap-1.5 disabled:opacity-50">
+                  <Package size={13} /> Mark Delivered
+                </button>
+              )}
+              {order.status === 'on_hold' && (
+                <button disabled={busy} onClick={() => act(() => onAction('resume', order.id))}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <Play size={13} /> Resume
+                </button>
+              )}
+              {!['rejected', 'fulfilled', 'cancelled', 'on_hold'].includes(order.status) && (
+                <button disabled={busy} onClick={() => setModal('hold')}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-orange-300 text-orange-600 hover:bg-orange-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <PauseCircle size={13} /> Hold
+                </button>
+              )}
+              {!['rejected', 'fulfilled', 'cancelled'].includes(order.status) && (
+                <button disabled={busy} onClick={() => setModal('reject')}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <XCircle size={13} /> Reject
+                </button>
+              )}
+              {busy && <RefreshCw size={14} className="animate-spin text-gray-400 self-center" />}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+
 // ── Main component ───────────────────────────────────────────────
 
 const LANES = [
   { key: 'incoming',   label: 'New Orders',         icon: Inbox,       variant: 'warning',  color: 'text-amber-700' },
-  { key: 'autoRefill', label: 'Auto-Refill Due',    icon: RotateCcw,   variant: 'purple',   color: 'text-purple-700' },
   { key: 'inProgress', label: 'In Progress',        icon: Clock,       variant: 'info',     color: 'text-indigo-700' },
   { key: 'awaiting',   label: 'Awaiting Patient',   icon: UserCheck,   variant: 'cyan',     color: 'text-cyan-700' },
   { key: 'confirmed',  label: 'Ready to Order',     icon: ShoppingCart, variant: 'emerald', color: 'text-emerald-700' },
@@ -715,13 +1989,14 @@ export default function DMEAdmin() {
   const [rxHistory, setRxHistory] = useState([])
   const [error, setError] = useState(null)
   const [expiringEncounters, setExpiringEncounters] = useState([])
+  const [newOrderOpen, setNewOrderOpen] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState(null)
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [dash, inc, refill, prog, await_, conf, hold, all] = await Promise.all([
+      const [dash, inc, prog, await_, conf, hold, all] = await Promise.all([
         getDMEDashboard(),
         getDMEIncoming(),
-        getDMEAutoRefillPending(),
         getDMEInProgress(),
         getDMEAwaitingPatient(),
         getDMEPatientConfirmed(),
@@ -729,7 +2004,7 @@ export default function DMEAdmin() {
         listDMEOrders(),
       ])
       setDashboard(dash)
-      setLanes({ incoming: inc, autoRefill: refill, inProgress: prog, awaiting: await_, confirmed: conf, onHold: hold })
+      setLanes({ incoming: inc, inProgress: prog, awaiting: await_, confirmed: conf, onHold: hold })
       setAllOrders(all)
     } catch (err) {
       console.error('DME admin load failed:', err)
@@ -746,6 +2021,11 @@ export default function DMEAdmin() {
     try {
       if (action === 'verify')           await verifyDMEInsurance(orderId)
       if (action === 'approve')          await approveDMEOrder(orderId)
+      if (action === 'approve-and-send') {
+        // Approve then immediately send confirmation to patient
+        await approveDMEOrder(orderId)
+        await sendDMEConfirmation(orderId, 'sms')
+      }
       if (action === 'reject')           await rejectDMEOrder(orderId, extra)
       if (action === 'fulfill')          await fulfillDMEOrder(orderId)
       if (action === 'hold')             await holdDMEOrder(orderId, extra)
@@ -807,15 +2087,30 @@ export default function DMEAdmin() {
           <p className="text-xs text-gray-400">Sleep medicine supply management</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setNewOrderOpen(true)}
+            className="text-sm flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+            <Plus size={14} /> New Order
+          </button>
           <button onClick={scanForPrescriptions} disabled={rxScanning}
             className="text-sm flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 transition-colors">
             {rxScanning ? <RefreshCw size={14} className="animate-spin" /> : <Pill size={14} />}
             {rxScanning ? 'Scanning eCW...' : 'Scan for Rx'}
           </button>
-          <button onClick={() => setActiveView(activeView === 'pipeline' ? 'all_orders' : 'pipeline')}
-            className="btn-secondary text-sm">
-            {activeView === 'pipeline' ? 'All Orders' : 'Pipeline'}
-          </button>
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+            {[
+              { key: 'pipeline', label: 'Pipeline' },
+              { key: 'all_orders', label: 'All Orders' },
+              { key: 'inventory', label: 'Inventory', icon: Warehouse },
+            ].map(v => (
+              <button key={v.key} onClick={() => setActiveView(v.key)}
+                className={`px-3 py-1.5 font-medium flex items-center gap-1.5 transition-colors ${
+                  activeView === v.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}>
+                {v.icon && <v.icon size={13} />}
+                {v.label}
+              </button>
+            ))}
+          </div>
           <button onClick={load} disabled={loading} className="btn-secondary text-sm flex items-center gap-2">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
@@ -823,10 +2118,12 @@ export default function DMEAdmin() {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-        {LANES.map(l => (
-          <StatCard key={l.key} label={l.label} value={laneCount(l.key)} icon={l.icon} variant={l.variant} />
-        ))}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+        {KANBAN_COLUMNS.map(col => {
+          const count = allOrders.filter(o => col.statuses.includes(o.status)).length
+          return <StatCard key={col.key} label={col.label} value={count} icon={col.icon} variant={col.color} />
+        })}
+        <StatCard label="On Hold" value={allOrders.filter(o => o.status === 'on_hold').length} icon={PauseCircle} variant="orange" />
         <StatCard label="Fulfilled" value={d.fulfilled ?? '—'} icon={Archive} variant="default"
           onClick={() => { setActiveView('all_orders'); setAllFilter('fulfilled') }} />
       </div>
@@ -907,25 +2204,82 @@ export default function DMEAdmin() {
         </div>
       )}
 
-      {loading ? (
+      {/* Order detail modal */}
+      {selectedOrder && (
+        <OrderDetailModal
+          order={selectedOrder}
+          onAction={(...args) => { handleAction(...args); setSelectedOrder(null) }}
+          onClose={() => setSelectedOrder(null)}
+        />
+      )}
+
+      {activeView === 'inventory' ? (
+        <DMEInventory />
+      ) : loading ? (
         <p className="text-gray-400 text-center py-12">Loading...</p>
       ) : activeView === 'pipeline' ? (
-        <div className="space-y-8">
-          {LANES.map(lane => {
-            const orders = lanes[lane.key] || []
-            return (
-              <section key={lane.key}>
-                <SectionHeader icon={lane.icon} title={lane.label} count={orders.length} color={lane.color} />
-                {orders.length === 0 ? (
-                  <EmptyState icon={lane.icon} message={`No orders in ${lane.label.toLowerCase()}`} />
-                ) : (
-                  <div className="space-y-2">
-                    {orders.map(o => <OrderRow key={o.id} order={o} onAction={handleAction} />)}
+        <div className="space-y-4">
+          {/* Kanban board */}
+          <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: '400px' }}>
+            {KANBAN_COLUMNS.map(col => {
+              const orders = allOrders.filter(o => col.statuses.includes(o.status))
+              const ColIcon = col.icon
+              return (
+                <div key={col.key} className={`flex-shrink-0 w-56 rounded-xl border ${col.borderColor} bg-gray-50/50 flex flex-col`}>
+                  {/* Column header */}
+                  <div className={`px-3 py-2.5 rounded-t-xl ${col.headerBg} border-b ${col.borderColor} flex items-center gap-2`}>
+                    <ColIcon size={14} className={col.headerText} />
+                    <span className={`text-sm font-semibold ${col.headerText}`}>{col.label}</span>
+                    <span className={`ml-auto text-xs font-bold ${col.headerText} bg-white/60 px-1.5 py-0.5 rounded-full`}>
+                      {orders.length}
+                    </span>
                   </div>
-                )}
-              </section>
+                  {/* Cards */}
+                  <div className="flex-1 p-2 space-y-2 overflow-y-auto" style={{ maxHeight: '600px' }}>
+                    {orders.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-6">No orders</p>
+                    ) : (
+                      orders.map(o => (
+                        <KanbanCard key={o.id} order={o} onAction={handleAction} onSelect={setSelectedOrder} />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* On Hold — collapsed row below the board */}
+          {(() => {
+            const holdOrders = allOrders.filter(o => o.status === 'on_hold')
+            if (holdOrders.length === 0) return null
+            return (
+              <div className="border border-orange-200 rounded-xl bg-orange-50/50">
+                <div className="px-4 py-2.5 flex items-center gap-2 border-b border-orange-200">
+                  <PauseCircle size={14} className="text-orange-600" />
+                  <span className="text-sm font-semibold text-orange-700">On Hold</span>
+                  <span className="text-xs font-bold text-orange-600 bg-white/60 px-1.5 py-0.5 rounded-full">{holdOrders.length}</span>
+                </div>
+                <div className="p-2 flex gap-2 flex-wrap">
+                  {holdOrders.map(o => (
+                    <div key={o.id}
+                      className="bg-white rounded-lg border border-orange-200 px-3 py-2 cursor-pointer hover:shadow-md transition-all flex items-center gap-3"
+                      onClick={() => setSelectedOrder(o)}
+                    >
+                      <div>
+                        <span className="font-medium text-sm text-gray-900">{o.patient_first_name} {o.patient_last_name}</span>
+                        <p className="text-xs text-gray-500 truncate max-w-48">{o.equipment_description || o.equipment_category}</p>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); handleAction('resume', o.id) }}
+                        className="text-xs px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1 shrink-0">
+                        <Play size={11} /> Resume
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )
-          })}
+          })()}
         </div>
       ) : (
         <div className="space-y-4">
@@ -952,15 +2306,15 @@ export default function DMEAdmin() {
       {/* Workflow guide */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
         <h3 className="font-medium text-blue-800 text-sm mb-1">DME Supply Workflow</h3>
-        <ol className="text-sm text-blue-600 leading-relaxed list-decimal list-inside space-y-1">
-          <li>New orders and auto-refills appear in their respective lanes</li>
-          <li>Check compliance (AirPM) and verify insurance coverage</li>
-          <li><strong>Approve</strong>, then <strong>Send to Patient</strong> — generates a confirmation link</li>
-          <li>Patient confirms address and chooses pickup or shipping</li>
-          <li><strong>Order from Vendor</strong> when patient confirms, then track through delivery</li>
-          <li>Fulfilled orders auto-schedule the next refill based on frequency</li>
-        </ol>
+        <p className="text-sm text-blue-600 leading-relaxed">
+          Orders flow left to right: <strong>New</strong> → <strong>Approved</strong> → <strong>Awaiting Patient</strong> → <strong>Confirmed</strong> → <strong>Ordering</strong> → <strong>Shipped</strong> → Fulfilled.
+          Click any card for full details and actions. The primary action button on each card advances it to the next stage.
+          Auto-refills show a <span className="text-purple-600 font-medium">purple badge</span>. Red age badges mean the order is over 7 days old.
+        </p>
       </div>
+
+      {/* New Order slide-over panel */}
+      <NewOrderPanel open={newOrderOpen} onClose={() => setNewOrderOpen(false)} onCreated={load} />
     </div>
   )
 }

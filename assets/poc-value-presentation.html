@@ -627,6 +627,8 @@
       No per-seat licenses. No annual contracts. Just usage-based cloud costs.
     </p>
 
+    <!-- ── Fixed Infrastructure Costs ── -->
+    <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--blue-900); margin-bottom: 8px;">Fixed Infrastructure (same for all options)</h4>
     <table class="cost-table">
       <thead>
         <tr>
@@ -639,10 +641,10 @@
         <tr>
           <td>
             Cloud Server
-            <span class="desc">AWS EC2 t3.small &mdash; runs the entire application</span>
+            <span class="desc">AWS EC2 t3.small &mdash; runs the application</span>
           </td>
           <td>2 vCPU, 2 GB RAM, 24/7</td>
-          <td>$15.18</td>
+          <td>$15</td>
         </tr>
         <tr>
           <td>
@@ -650,7 +652,7 @@
             <span class="desc">Server disk + fax document archive</span>
           </td>
           <td>20 GB base + 3&ndash;5 GB/mo faxes</td>
-          <td>$1.90 &ndash; $2.13</td>
+          <td>$2</td>
         </tr>
         <tr>
           <td>
@@ -658,59 +660,133 @@
             <span class="desc">patientsynapse.com on Route 53</span>
           </td>
           <td>Hosted zone + queries</td>
-          <td>$0.51</td>
+          <td>$1</td>
         </tr>
         <tr>
           <td>
-            SSL Certificate
-            <span class="desc">Let's Encrypt &mdash; auto-renewing TLS</span>
+            SSL / OCR / Database
+            <span class="desc">Let's Encrypt, Tesseract OCR, SQLite &mdash; all open-source</span>
           </td>
-          <td>Free</td>
-          <td>$0.00</td>
+          <td>Included in server, no extra cost</td>
+          <td>$0</td>
         </tr>
-        <tr>
-          <td>
-            AI Processing
-            <span class="desc">LLM API for document classification + data extraction</span>
-          </td>
-          <td>2 AI calls per fax, 3,000&ndash;5,250/mo</td>
-          <td>$35 &ndash; $61</td>
-        </tr>
-        <tr>
-          <td>
-            OCR Engine
-            <span class="desc">Tesseract &mdash; open-source text recognition</span>
-          </td>
-          <td>Runs locally on server</td>
-          <td>$0.00</td>
-        </tr>
-        <tr>
-          <td>
-            Database
-            <span class="desc">Audit logs, user accounts, allowable rates</span>
-          </td>
-          <td>SQLite (on-disk, no separate service)</td>
-          <td>$0.00</td>
-        </tr>
-        <tr>
-          <td>
-            Data Transfer
-            <span class="desc">AWS network egress</span>
-          </td>
-          <td>Well under free tier (100 GB/mo)</td>
-          <td>$0.00</td>
-        </tr>
-        <tr class="total-row">
-          <td colspan="2">Monthly Total</td>
-          <td>$53 &ndash; $79</td>
+        <tr style="background: var(--gray-50);">
+          <td colspan="2" style="font-weight: 600; color: var(--gray-700);">Infrastructure subtotal</td>
+          <td style="font-weight: 600;">~$18/mo</td>
         </tr>
       </tbody>
     </table>
 
-    <p style="font-size: 0.82rem; color: var(--gray-500); margin-top: 8px;">
-      * AI processing is the largest variable cost and scales linearly with volume. All other costs are fixed.
-      Future optimization with task-based model routing reduces AI cost by ~10&ndash;15%.
+    <!-- ── AI Processing Options ── -->
+    <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--blue-900); margin: 28px 0 4px;">AI Processing Options</h4>
+    <p style="font-size: 0.82rem; color: var(--gray-500); margin-bottom: 12px;">
+      2 AI calls per fax (classify + extract) &times; 100&ndash;175 faxes/day = 3,000&ndash;5,250 calls/month.
     </p>
+
+    <table class="cost-table">
+      <thead>
+        <tr>
+          <th>Option</th>
+          <th>Details</th>
+          <th>Monthly Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <strong style="color: var(--green-700);">A. AWS Bedrock &mdash; Recommended</strong>
+            <span class="desc">HIPAA-eligible, covered by AWS BAA, zero infrastructure to manage</span>
+          </td>
+          <td>
+            Llama 3.1 8B: $0.22/M input, $0.22/M output<br>
+            Claude Haiku: $0.25/M input, $1.25/M output
+          </td>
+          <td><strong>$1 &ndash; $5</strong></td>
+        </tr>
+        <tr>
+          <td>
+            B. Bedrock &mdash; Higher Quality
+            <span class="desc">Better extraction accuracy with larger models</span>
+          </td>
+          <td>
+            Claude 3.5 Haiku: $0.80/M input, $4.00/M output<br>
+            Llama 3.1 70B: $0.72/M input, $0.72/M output
+          </td>
+          <td>$5 &ndash; $17</td>
+        </tr>
+        <tr>
+          <td>
+            C. Ollama &mdash; Fully Local
+            <span class="desc">No PHI leaves your infrastructure. Requires a dedicated GPU instance</span>
+          </td>
+          <td>
+            g4dn.xlarge (T4 GPU, 16 GB VRAM)<br>
+            Runs Llama 3.1 8B or Mistral 7B locally
+          </td>
+          <td>~$380</td>
+        </tr>
+        <tr>
+          <td>
+            D. Ollama &mdash; CPU-Only
+            <span class="desc">Lowest cost local option. Slower inference (~50&ndash;100s per call)</span>
+          </td>
+          <td>
+            c6i.2xlarge (8 vCPU, 16 GB RAM)<br>
+            7B quantized model, no GPU
+          </td>
+          <td>~$244</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- ── Total Cost Summary ── -->
+    <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--blue-900); margin: 28px 0 8px;">Monthly Total by Deployment</h4>
+    <table class="cost-table">
+      <thead>
+        <tr>
+          <th>Deployment</th>
+          <th>AI Model</th>
+          <th>Monthly Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="total-row">
+          <td>Cloud + Bedrock (recommended)</td>
+          <td>Llama 3.1 8B or Claude Haiku on AWS</td>
+          <td>$19 &ndash; $23</td>
+        </tr>
+        <tr>
+          <td>Cloud + Bedrock (premium)</td>
+          <td>Claude 3.5 Haiku for max accuracy</td>
+          <td>$23 &ndash; $35</td>
+        </tr>
+        <tr>
+          <td>Cloud + Local GPU</td>
+          <td>Ollama on g4dn.xlarge (T4 GPU)</td>
+          <td>~$398</td>
+        </tr>
+        <tr>
+          <td>Cloud + Local CPU</td>
+          <td>Ollama on c6i.2xlarge (CPU only)</td>
+          <td>~$262</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="font-size: 0.82rem; color: var(--gray-500); margin-top: 12px;">
+      * Bedrock pricing is pay-per-token with no minimum. At this volume, AI costs are effectively rounding error.
+      Local Ollama makes sense only when regulations prohibit sending PHI to any third-party API, even with a signed BAA.
+    </p>
+
+    <div style="background: var(--blue-50); border-radius: 10px; padding: 16px 20px; margin-top: 16px;">
+      <strong style="color: var(--blue-900); font-size: 0.9rem;">Why Bedrock?</strong>
+      <span style="color: var(--gray-700); font-size: 0.85rem;">
+        AWS Bedrock is HIPAA-eligible and covered by the standard AWS Business Associate Agreement (BAA).
+        Your PHI stays within your AWS account&rsquo;s security boundary. No model training on your data.
+        No separate vendor relationship to manage. And at $1&ndash;$5/month for this volume, it&rsquo;s
+        75&ndash;380x cheaper than running your own GPU instance.
+      </span>
+    </div>
   </div>
 </section>
 
@@ -720,7 +796,7 @@
 <section>
   <div class="container">
     <div class="section-label">Return on Investment</div>
-    <div class="section-title">$53&ndash;$79/month vs. What You're Spending Now</div>
+    <div class="section-title">$19&ndash;$35/month vs. What You're Spending Now</div>
 
     <div class="roi-highlight">
       <div class="roi-item">
@@ -728,11 +804,11 @@
         <div class="roi-label">Current monthly cost<br>(staff time on fax processing)</div>
       </div>
       <div class="roi-item">
-        <div class="roi-value">$53&ndash;$79</div>
+        <div class="roi-value">$19&ndash;$35</div>
         <div class="roi-label">PatientSynapse<br>total monthly cost</div>
       </div>
       <div class="roi-item">
-        <div class="roi-value">11&ndash;17x</div>
+        <div class="roi-value">25&ndash;46x</div>
         <div class="roi-label">Return on<br>investment</div>
       </div>
     </div>

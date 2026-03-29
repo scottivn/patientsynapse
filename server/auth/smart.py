@@ -3,6 +3,9 @@
 import time
 import json
 import uuid
+import secrets
+import hashlib
+import base64
 import httpx
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -36,6 +39,7 @@ class SMARTAuth:
     def __init__(self, emr: EMRProvider):
         self.emr = emr
         self._token: Optional[TokenSet] = None
+        self._code_verifier: Optional[str] = None  # PKCE
         self._key_path = Path("keys")
         self._key_path.mkdir(exist_ok=True)
         # Only load/generate RSA key when using JWT auth
@@ -103,9 +107,21 @@ class SMARTAuth:
 
     # ---- OAuth2 URL / token helpers ----
 
+    @staticmethod
+    def _generate_pkce() -> tuple[str, str]:
+        """Generate PKCE code_verifier and code_challenge (S256)."""
+        verifier = secrets.token_urlsafe(64)[:128]
+        digest = hashlib.sha256(verifier.encode("ascii")).digest()
+        challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        return verifier, challenge
+
     def get_authorize_url(self, state: Optional[str] = None) -> str:
         from urllib.parse import urlencode
         state = state or str(uuid.uuid4())
+
+        # PKCE — required by eCW and recommended by OAuth 2.1
+        self._code_verifier, code_challenge = self._generate_pkce()
+
         params = {
             "response_type": "code",
             "client_id": self.emr.client_id,
@@ -113,6 +129,8 @@ class SMARTAuth:
             "scope": " ".join(self.emr.scopes),
             "state": state,
             "aud": self.emr.fhir_base_url,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
         }
         return f"{self.emr.authorize_url}?{urlencode(params)}"
 
@@ -188,11 +206,16 @@ class SMARTAuth:
             return self._token
 
     async def exchange_code(self, code: str) -> TokenSet:
-        data = self._build_token_data(
-            grant_type="authorization_code",
-            code=code,
-            redirect_uri=self.emr.redirect_uri,
-        )
+        extra = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": self.emr.redirect_uri,
+        }
+        # PKCE — send code_verifier to prove we initiated the flow
+        if self._code_verifier:
+            extra["code_verifier"] = self._code_verifier
+            self._code_verifier = None  # single-use
+        data = self._build_token_data(**extra)
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 self.emr.token_url,

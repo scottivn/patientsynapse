@@ -20,6 +20,7 @@ class StubFHIRClient:
         # Seed with a handful of test patients matching dummy fax data
         self._seed_patients()
         self._seed_prescriptions()
+        self._seed_devices()
         logger.info("StubFHIRClient initialized (in-memory, no EMR connection)")
 
     # ------------------------------------------------------------------
@@ -290,3 +291,57 @@ class StubFHIRClient:
                 "grouping": {"group": group, "plan": plan_type.upper()},
                 "period": {"start": "2024-01-01", "end": "2026-12-31"},
             }
+
+    def _seed_devices(self):
+        """Pre-populate Device store with DME equipment for test patients."""
+        devices = [
+            {
+                "resourceType": "Device", "id": "DEV001",
+                "status": "active",
+                "type": {"coding": [{"system": "http://snomed.info/sct", "code": "702172008", "display": "CPAP device"}], "text": "CPAP Machine"},
+                "manufacturer": "ResMed",
+                "modelNumber": "AirSense 11 AutoSet",
+                "serialNumber": "RS11-2024-00147",
+                "patient": {"reference": "Patient/PT001"},
+                "note": [{"text": "Settings: pressure 10 cmH2O, EPR 2, ramp 20 min"}],
+            },
+            {
+                "resourceType": "Device", "id": "DEV002",
+                "status": "active",
+                "type": {"coding": [{"system": "http://snomed.info/sct", "code": "467141004", "display": "Nasal mask"}], "text": "CPAP Mask — Nasal"},
+                "manufacturer": "ResMed",
+                "modelNumber": "AirFit N30i",
+                "patient": {"reference": "Patient/PT001"},
+                "note": [{"text": "Size: Medium, Standard frame"}],
+            },
+            {
+                "resourceType": "Device", "id": "DEV003",
+                "status": "active",
+                "type": {"coding": [{"system": "http://snomed.info/sct", "code": "702172008", "display": "BiPAP device"}], "text": "BiPAP / ASV Machine"},
+                "manufacturer": "ResMed",
+                "modelNumber": "AirCurve 10 ASV",
+                "serialNumber": "AC10-2025-00382",
+                "patient": {"reference": "Patient/PT003"},
+                "note": [{"text": "Settings: IPAP 15, EPAP 8, auto-SV mode"}],
+            },
+            {
+                "resourceType": "Device", "id": "DEV004",
+                "status": "active",
+                "type": {"coding": [{"system": "http://snomed.info/sct", "code": "702172008", "display": "CPAP device"}], "text": "CPAP Machine"},
+                "manufacturer": "Philips Respironics",
+                "modelNumber": "DreamStation 2 Auto",
+                "serialNumber": "DS2-2025-01044",
+                "patient": {"reference": "Patient/PT004"},
+                "note": [{"text": "Settings: pressure 12 cmH2O, A-Flex 3"}],
+            },
+            {
+                "resourceType": "Device", "id": "DEV005",
+                "status": "active",
+                "type": {"coding": [{"system": "http://snomed.info/sct", "code": "467141004", "display": "Full face mask"}], "text": "CPAP Mask — Full Face"},
+                "manufacturer": "Philips Respironics",
+                "modelNumber": "DreamWear Full Face",
+                "patient": {"reference": "Patient/PT004"},
+                "note": [{"text": "Size: Large"}],
+            },
+        ]
+        self._store["Device"] = {d["id"]: d for d in devices}

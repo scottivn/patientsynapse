@@ -87,6 +87,11 @@ class EMRProvider(ABC):
         return []
 
     @property
+    def default_search_params(self) -> dict:
+        """Extra params merged into every FHIR search (e.g. Athena ah-practice)."""
+        return {}
+
+    @property
     def notes(self) -> str:
         """Any human-readable notes about EMR-specific limitations."""
         return ""

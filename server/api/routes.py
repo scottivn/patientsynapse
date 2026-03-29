@@ -19,6 +19,7 @@ from server.services.fax_ingestion import FaxIngestionService
 from server.services.dme import DMEService, DMEOrderStatus
 from server.services.referral_auth import ReferralAuthService, ReferralAuthStatus
 from server.services.prescription_monitor import PrescriptionMonitorService
+from server.services.prior_auth import PriorAuthService, PriorAuthStatus
 from server.emr import get_emr, switch_emr, get_active_emr_key
 from server.llm import get_llm, switch_llm, get_active_llm_key
 from server.config import get_settings
@@ -61,6 +62,19 @@ class DMEOrderCreate(BaseModel):
     clinical_notes: str = PydanticField(default="", max_length=2000)
     hcpcs_codes: list[str] = PydanticField(default=[])
     supply_months: int = PydanticField(default=6, ge=1, le=36)
+
+
+class DMEAdminOrderCreate(DMEOrderCreate):
+    """Admin-only order creation — includes auto-refill and origin fields."""
+    auto_replace: bool = False
+    auto_replace_frequency: Optional[str] = PydanticField(default=None, max_length=20)
+    origin: str = PydanticField(default="staff_initiated", max_length=50)
+
+
+class DMERefillToggle(BaseModel):
+    """Patient auto-refill opt-in/out via confirmation token."""
+    auto_replace: bool
+    frequency: str = PydanticField(default="quarterly", max_length=20)
 
 
 # ---- Login rate limiter ----
@@ -108,6 +122,7 @@ _fax_ingestion_service: Optional[FaxIngestionService] = None
 _dme_service: DMEService = DMEService()
 _referral_auth_service: ReferralAuthService = ReferralAuthService()
 _prescription_monitor: Optional[PrescriptionMonitorService] = None
+_prior_auth_service: PriorAuthService = PriorAuthService()
 _smart_auth = None  # Shared SMARTAuth instance
 
 def set_prescription_monitor(svc: PrescriptionMonitorService):
@@ -360,15 +375,26 @@ async def auth_login():
 
 
 @router.get("/auth/callback", tags=["SMART on FHIR"], dependencies=[Depends(require_admin)])
-async def auth_callback(code: str, state: Optional[str] = None):
+async def auth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
     """Handle OAuth callback with authorization code (3-legged)."""
+    # eCW may redirect with error params instead of a code
+    if error:
+        logger.error(f"OAuth error from EMR: {error} — {error_description}")
+        return {"status": "error", "error": error, "error_description": error_description}
+    if not code:
+        raise HTTPException(400, "No authorization code received from EMR.")
     auth = get_smart_auth()
     try:
         token = await auth.exchange_code(code)
         return {"status": "authenticated", "emr": get_emr().name, "scope": token.scope}
     except Exception as e:
         logger.error(f"Token exchange failed: {e}")
-        raise HTTPException(400, "Token exchange failed. Check server logs.")
+        raise HTTPException(400, f"Token exchange failed: {e}")
 
 
 @router.post("/auth/connect-service", tags=["SMART on FHIR"], dependencies=[Depends(require_admin)])
@@ -827,6 +853,12 @@ async def switch_emr_provider(body: EMRSwitch):
     # Rewire referral auth service
     _referral_auth_service.set_fhir_client(fhir_client)
 
+    # Rewire DME service
+    _dme_service.set_fhir_client(fhir_client)
+
+    # Rewire prior auth service
+    _prior_auth_service.set_fhir_client(fhir_client)
+
     logger.info(f"EMR switched to {emr.name}")
     return {
         "status": "switched",
@@ -931,6 +963,15 @@ class DMEMarkShipped(BaseModel):
     carrier: str = ""
     estimated_delivery: str = ""
 
+class PriorAuthUpdate(BaseModel):
+    action: str  # "submit", "approve", "deny"
+    auth_number: Optional[str] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    denial_reason: Optional[str] = None
+    submission_notes: Optional[str] = None
+    staff_notes: Optional[str] = None
+
 
 @router.post("/dme/patient-verify", tags=["DME Patient Portal"])
 async def dme_patient_verify(body: DMEPatientVerify):
@@ -1000,6 +1041,28 @@ async def dme_patient_verify(body: DMEPatientVerify):
     }
 
 
+@router.get("/dme/patients/search", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_patient_search(
+    family: str = Query("", min_length=0, max_length=100),
+    given: str = Query("", min_length=0, max_length=100),
+    dob: str = Query("", max_length=10),
+    mrn: str = Query("", max_length=100),
+):
+    """Search EMR for patients by name/DOB or MRN. Returns demographics, insurance, devices, and order history."""
+    if mrn:
+        return await _dme_service.search_patients_by_mrn(mrn)
+    if not family and not given:
+        raise HTTPException(400, "Provide at least a first or last name, or an MRN")
+    return await _dme_service.search_patients(family=family, given=given, dob=dob)
+
+
+@router.post("/dme/admin/orders", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def create_admin_dme_order(body: DMEAdminOrderCreate):
+    """Staff-initiated DME order creation with auto-refill support."""
+    order = await _dme_service.create_order(body.model_dump())
+    return _serialize_dme_order(order)
+
+
 @router.post("/dme/orders", tags=["DME Patient Portal"])
 async def create_dme_order(body: DMEOrderCreate):
     """Submit a new DME order from the patient portal."""
@@ -1012,7 +1075,10 @@ async def list_dme_orders(status: Optional[str] = Query(None)):
     """List DME orders for the admin portal."""
     filter_status = DMEOrderStatus(status) if status else None
     orders = await _dme_service.list_orders(filter_status)
-    return [_serialize_dme_order(o) for o in orders]
+    # Batch-fetch prior-auth data for all orders (avoids N+1)
+    order_ids = [o.id for o in orders]
+    pa_map = await _prior_auth_service.get_auths_for_orders(order_ids)
+    return [_serialize_dme_order(o, pa_map) for o in orders]
 
 
 @router.get("/dme/orders/auto-replace-due", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
@@ -1089,9 +1155,104 @@ async def dme_equipment_categories():
     }
 
 
+@router.get("/dme/products", tags=["DME Reference Data"])
+async def dme_products(category: Optional[str] = None):
+    """Return the DME product catalog, optionally filtered by category."""
+    from server.services.dme_products import get_all_products, get_products_by_category
+    if category:
+        return {"products": await get_products_by_category(category)}
+    return {"products": await get_all_products()}
+
+
+@router.get("/dme/products/categories", tags=["DME Reference Data"])
+async def dme_product_categories():
+    """Return distinct product categories."""
+    from server.services.dme_products import get_product_categories
+    return {"categories": await get_product_categories()}
+
+
+@router.get("/dme/products/{product_id}", tags=["DME Reference Data"])
+async def dme_product_detail(product_id: str):
+    """Return a single product by ID."""
+    from server.services.dme_products import get_product
+    product = await get_product(product_id)
+    if not product:
+        raise HTTPException(404, "Product not found")
+    return product
+
+
+@router.get("/dme/vendors", tags=["DME Reference Data"])
+async def dme_vendors():
+    """Return vendor options with portal info."""
+    from server.services.dme_products import get_all_vendors
+    return {"vendors": get_all_vendors()}
+
+
+# ── In-House Inventory ───────────────────────────────────────────────
+
+@router.get("/dme/inventory", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_inventory():
+    """Return full in-house inventory with product details."""
+    from server.services.dme_products import get_inventory, get_inventory_summary
+    return {
+        "items": await get_inventory(),
+        "summary": await get_inventory_summary(),
+    }
+
+
+@router.get("/dme/inventory/low-stock", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_low_stock():
+    """Return items at or below reorder point."""
+    from server.services.dme_products import get_low_stock_items
+    return {"items": await get_low_stock_items()}
+
+
+@router.put("/dme/inventory/{inventory_id}", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_update_inventory(inventory_id: str, body: dict):
+    """Set inventory quantity and/or reorder point."""
+    from server.services.dme_products import update_inventory
+    quantity = body.get("quantity")
+    reorder_point = body.get("reorder_point")
+    if quantity is None:
+        raise HTTPException(400, "quantity is required")
+    if quantity < 0:
+        raise HTTPException(400, "quantity cannot be negative")
+    result = await update_inventory(inventory_id, quantity, reorder_point)
+    if not result:
+        raise HTTPException(404, "Inventory item not found")
+    return dict(result)
+
+
+@router.post("/dme/inventory/{inventory_id}/adjust", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_adjust_inventory(inventory_id: str, body: dict):
+    """Increment or decrement stock. Use positive delta to add, negative to remove."""
+    from server.services.dme_products import adjust_inventory
+    delta = body.get("delta")
+    if delta is None or not isinstance(delta, int):
+        raise HTTPException(400, "delta (integer) is required")
+    result = await adjust_inventory(inventory_id, delta)
+    if not result:
+        raise HTTPException(404, "Inventory item not found")
+    return dict(result)
+
+
+@router.post("/dme/inventory/{inventory_id}/restock", tags=["DME Inventory"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_restock_inventory(inventory_id: str, body: dict):
+    """Add stock and record restock date."""
+    from server.services.dme_products import restock_inventory
+    quantity = body.get("quantity")
+    if not quantity or quantity <= 0:
+        raise HTTPException(400, "quantity must be positive")
+    result = await restock_inventory(inventory_id, quantity)
+    if not result:
+        raise HTTPException(404, "Inventory item not found")
+    return dict(result)
+
+
 @router.get("/dme/dashboard", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
 async def dme_dashboard():
-    """DME summary stats for the admin portal."""
+    """DME summary stats for the admin portal. Also triggers auto-refill processing."""
+    await _dme_service.process_due_refills()
     return await _dme_service.get_dashboard()
 
 
@@ -1108,7 +1269,8 @@ async def get_dme_order(order_id: str):
     order = await _dme_service.get_order(order_id)
     if not order:
         raise HTTPException(404, f"DME order {order_id} not found")
-    return _serialize_dme_order(order)
+    pa_map = await _prior_auth_service.get_auths_for_orders([order_id])
+    return _serialize_dme_order(order, pa_map)
 
 
 @router.post("/dme/orders/{order_id}/verify-insurance", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
@@ -1128,7 +1290,10 @@ async def approve_dme_order(order_id: str, body: DMEOrderApproval = DMEOrderAppr
         order = await _dme_service.approve_order(order_id, body.notes or "")
         return _serialize_dme_order(order)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        msg = str(e)
+        # Prior-auth block is a business rule, not a 404
+        status = 409 if "Cannot approve" in msg else 404
+        raise HTTPException(status, msg)
 
 
 @router.post("/dme/orders/{order_id}/reject", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
@@ -1315,11 +1480,113 @@ async def reject_dme_confirmation(token: str, body: DMEPatientReject):
     return {"status": "received", "message": "We'll review this and get back to you."}
 
 
+@router.post("/dme/confirm/{token}/toggle-refill", tags=["DME Patient Portal"])
+async def toggle_dme_refill(token: str, body: DMERefillToggle):
+    """Patient opts in or out of auto-refill. PUBLIC endpoint — token-gated."""
+    order = await _dme_service.patient_toggle_refill(
+        token, body.auto_replace, body.frequency,
+    )
+    if not order:
+        raise HTTPException(404, "This link is invalid or has expired. Please contact our office.")
+    status = "enabled" if body.auto_replace else "disabled"
+    return {"status": status, "auto_replace": order.auto_replace, "frequency": order.auto_replace_frequency}
+
+
+@router.post("/dme/process-auto-refills", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_process_auto_refills():
+    """Process due auto-refill orders: create child orders and send confirmation to patients."""
+    created = await _dme_service.process_due_refills()
+    return {"processed": len(created), "order_ids": [o.id for o in created]}
+
+
 @router.post("/dme/process-auto-deliveries", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
 async def dme_process_auto_deliveries():
     """Fulfill orders whose auto-deliver timer has expired."""
     fulfilled = await _dme_service.process_auto_deliveries()
     return {"fulfilled": len(fulfilled), "order_ids": [o.id for o in fulfilled]}
+
+
+# ---- DME Prior Authorization routes ----
+
+@router.get("/dme/prior-auth/pending", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_prior_auth_pending():
+    """List all pending/submitted prior-auth requests needing follow-up."""
+    auths = await _prior_auth_service.list_pending()
+    return [_prior_auth_service._serialize(a) for a in auths]
+
+
+@router.get("/dme/prior-auth/expiring", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_prior_auth_expiring(days: int = 14):
+    """List approved prior-auths expiring within N days."""
+    auths = await _prior_auth_service.get_expiring(days)
+    return [_prior_auth_service._serialize(a) for a in auths]
+
+
+@router.get("/dme/prior-auth/dashboard", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_prior_auth_dashboard():
+    """Summary counts for prior-auth requests."""
+    return await _prior_auth_service.get_dashboard()
+
+
+@router.post("/dme/orders/{order_id}/prior-auth/check", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_check_prior_auth(order_id: str):
+    """Check if a DME order requires prior authorization."""
+    try:
+        return await _prior_auth_service.check_auth_required(order_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/dme/orders/{order_id}/prior-auth", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_get_prior_auth(order_id: str):
+    """Get the prior-auth request for a DME order."""
+    auth = await _prior_auth_service.get_auth_for_order(order_id)
+    if not auth:
+        raise HTTPException(404, "No prior-auth request found for this order")
+    return _prior_auth_service._serialize(auth)
+
+
+@router.post("/dme/orders/{order_id}/prior-auth", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_create_prior_auth(order_id: str):
+    """Create a prior-auth request for a DME order."""
+    try:
+        auth = await _prior_auth_service.create_auth_request(order_id)
+        return _prior_auth_service._serialize(auth)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/dme/prior-auth/{auth_id}", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_update_prior_auth(auth_id: str, body: PriorAuthUpdate):
+    """Update a prior-auth request (submit, approve, or deny)."""
+    try:
+        if body.action == "submit":
+            auth = await _prior_auth_service.submit_auth(auth_id, body.submission_notes or "")
+        elif body.action == "approve":
+            auth = await _prior_auth_service.record_decision(
+                auth_id, approved=True,
+                auth_number=body.auth_number or "",
+                valid_from=body.valid_from or "",
+                valid_until=body.valid_until or "",
+                staff_notes=body.staff_notes or "",
+            )
+        elif body.action == "deny":
+            auth = await _prior_auth_service.record_decision(
+                auth_id, approved=False,
+                denial_reason=body.denial_reason or "",
+                staff_notes=body.staff_notes or "",
+            )
+        else:
+            raise HTTPException(400, f"Unknown action: {body.action}. Use 'submit', 'approve', or 'deny'.")
+        return _prior_auth_service._serialize(auth)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/dme/orders/{order_id}/prior-auth/can-fulfill", tags=["DME Prior Auth"], dependencies=[Depends(require_role("admin", "dme"))])
+async def dme_can_fulfill(order_id: str):
+    """Check if a DME order can proceed (prior-auth approved or not required)."""
+    return await _prior_auth_service.can_fulfill(order_id)
 
 
 @router.get("/dme/orders/{order_id}/receipt", tags=["DME Orders"], dependencies=[Depends(require_role("admin", "dme"))])
@@ -1342,7 +1609,7 @@ async def dme_order_delivery_ticket(order_id: str):
 
 # ---- Helpers ----
 
-def _serialize_dme_order(order) -> dict:
+def _serialize_dme_order(order, prior_auth_map: dict = None) -> dict:
     from dataclasses import asdict
     d = asdict(order)
     d["status"] = order.status.value
@@ -1350,6 +1617,11 @@ def _serialize_dme_order(order) -> dict:
     d["encounter_current"] = order.encounter_current
     d["encounter_days_ago"] = order.encounter_days_ago
     d["encounter_expires_in_days"] = order.encounter_expires_in_days
+    # Attach prior-auth if provided via batch map
+    if prior_auth_map and order.id in prior_auth_map:
+        d["prior_auth"] = prior_auth_map[order.id]
+    else:
+        d["prior_auth"] = None
     return d
 
 

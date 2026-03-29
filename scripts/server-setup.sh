@@ -56,7 +56,9 @@ server {
 
     client_max_body_size 50M;
 
-    # JWKS (must be fast and public)
+    # ── Public locations (no IP restriction) ────────────────
+
+    # JWKS — must be public (eCW fetches this during OAuth token exchange)
     location /.well-known/jwks.json {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -65,8 +67,18 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Let's Encrypt ACME challenge — must be public for cert renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    # ── Restricted locations (IP allowlist) ───────────────
+    # Run 'bash scripts/update-ip.sh' to set your current IP
+
     # API routes
     location /api/ {
+        allow 0.0.0.0;  # PLACEHOLDER — updated by scripts/update-ip.sh
+        deny all;
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -75,8 +87,39 @@ server {
         proxy_read_timeout 120s;
     }
 
+    # FastAPI docs (Swagger/ReDoc)
+    location /docs {
+        allow 0.0.0.0;
+        deny all;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location /redoc {
+        allow 0.0.0.0;
+        deny all;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location /openapi.json {
+        allow 0.0.0.0;
+        deny all;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # Frontend static assets
     location /assets/ {
+        allow 0.0.0.0;
+        deny all;
         alias /opt/patientsynapse/frontend/dist/assets/;
         expires 30d;
         add_header Cache-Control "public, immutable";
@@ -84,6 +127,8 @@ server {
 
     # Frontend SPA fallback
     location / {
+        allow 0.0.0.0;
+        deny all;
         root /opt/patientsynapse/frontend/dist;
         try_files $uri $uri/ /index.html;
     }

@@ -261,7 +261,7 @@ async def test_ordering_shows_being_fulfilled():
         patient_address="123 Test", patient_city="Test", patient_state="TX", patient_zip="78229",
     )
     order.status = DMEOrderStatus.ORDERING
-    assert order.patient_display_status == "Being fulfilled"
+    assert order.patient_display_status == "In progress \u2014 being fulfilled"
 
 
 # ──────────────────────────────────────────────
@@ -450,3 +450,338 @@ async def test_auto_deliveries_endpoint(client, admin_cookies):
     assert resp.status_code == 200
     data = resp.json()
     assert "fulfilled" in data
+
+
+# ──────────────────────────────────────────────
+# Group 5: Auto-Refill Automation
+# ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_process_due_refills_creates_child_order():
+    """process_due_refills creates a PATIENT_CONTACTED child order from a fulfilled parent."""
+    from server.services.dme import DMEService, DMEOrderStatus, _save_order
+    svc = DMEService()
+    parent = await svc.create_order({
+        "patient_first_name": "Refill",
+        "patient_last_name": "Test",
+        "patient_dob": "1985-06-15",
+        "patient_phone": "555-0099",
+        "patient_address": "100 Main St",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Mask — Nasal",
+        "equipment_description": "Full Resupply (Nasal)",
+        "auto_replace": True,
+        "auto_replace_frequency": "quarterly",
+    })
+    # Simulate fulfilled order with next_replace_date in the past
+    parent.status = DMEOrderStatus.FULFILLED
+    parent.fulfilled_at = datetime.now().isoformat()
+    parent.next_replace_date = (date.today() - timedelta(days=1)).isoformat()
+    await _save_order(parent)
+
+    created = await svc.process_due_refills()
+    assert len(created) >= 1
+    child = next(c for c in created if c.parent_order_id == parent.id)
+    assert child.status == DMEOrderStatus.PATIENT_CONTACTED
+    assert child.origin == "auto_refill"
+    assert child.confirmation_token is not None
+    assert child.patient_first_name == "Refill"
+    assert child.equipment_description == parent.equipment_description
+
+    # Parent's next_replace_date should be advanced
+    updated_parent = await svc.get_order(parent.id)
+    assert updated_parent.next_replace_date > date.today().isoformat()
+
+
+@pytest.mark.asyncio
+async def test_process_due_refills_skips_not_yet_due():
+    """process_due_refills does nothing for orders whose next_replace_date is in the future."""
+    from server.services.dme import DMEService, DMEOrderStatus, _save_order
+    svc = DMEService()
+    parent = await svc.create_order({
+        "patient_first_name": "Future",
+        "patient_last_name": "Refill",
+        "patient_dob": "1985-06-15",
+        "patient_phone": "555-0100",
+        "patient_address": "200 Main St",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Mask — Nasal",
+        "equipment_description": "Full Resupply (Nasal)",
+        "auto_replace": True,
+        "auto_replace_frequency": "quarterly",
+    })
+    parent.status = DMEOrderStatus.FULFILLED
+    parent.fulfilled_at = datetime.now().isoformat()
+    parent.next_replace_date = (date.today() + timedelta(days=30)).isoformat()
+    await _save_order(parent)
+
+    created = await svc.process_due_refills()
+    # Should not create any child for this parent
+    child_ids = [c.parent_order_id for c in created]
+    assert parent.id not in child_ids
+
+
+@pytest.mark.asyncio
+async def test_process_auto_refills_endpoint(client, admin_cookies):
+    """POST /api/dme/process-auto-refills works via HTTP."""
+    resp = await client.post("/api/dme/process-auto-refills", cookies=admin_cookies)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "processed" in data
+
+
+# ──────────────────────────────────────────────
+# Group 6: DME Patient Onboarding & Staff-Initiated Orders
+# ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_admin_create_order_with_auto_refill(client, admin_cookies):
+    """POST /api/dme/admin/orders creates an order with auto_replace fields."""
+    resp = await client.post("/api/dme/admin/orders", cookies=admin_cookies, json={
+        "patient_first_name": "Staff",
+        "patient_last_name": "Order",
+        "patient_dob": "1980-01-15",
+        "patient_phone": "555-0200",
+        "patient_address": "100 Admin Ave",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Mask — Nasal",
+        "equipment_description": "Full Resupply (Nasal)",
+        "auto_replace": True,
+        "auto_replace_frequency": "quarterly",
+        "origin": "staff_initiated",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["auto_replace"] is True
+    assert data["auto_replace_frequency"] == "quarterly"
+    assert data["origin"] == "staff_initiated"
+    assert data["patient_first_name"] == "Staff"
+
+
+@pytest.mark.asyncio
+async def test_admin_create_order_requires_auth(client):
+    """POST /api/dme/admin/orders returns 401 without credentials."""
+    resp = await client.post("/api/dme/admin/orders", json={
+        "patient_first_name": "No",
+        "patient_last_name": "Auth",
+        "equipment_category": "CPAP Machine",
+        "equipment_description": "Test",
+    })
+    assert resp.status_code == 401
+
+
+def _wire_stub_fhir():
+    """Wire a StubFHIRClient into _dme_service for tests (lifespan doesn't run with ASGITransport)."""
+    from server.fhir.stub_client import StubFHIRClient
+    from server.api.routes import _dme_service
+    if not _dme_service._fhir_client:
+        _dme_service.set_fhir_client(StubFHIRClient())
+
+
+@pytest.mark.asyncio
+async def test_patient_search_by_name_dob(client, admin_cookies):
+    """GET /api/dme/patients/search returns patients with demographics, insurance, and devices."""
+    _wire_stub_fhir()
+    resp = await client.get(
+        "/api/dme/patients/search",
+        params={"family": "Garcia", "given": "Maria"},
+        cookies=admin_cookies,
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) >= 1
+    patient = results[0]
+    assert patient["last_name"] == "Garcia"
+    assert patient["first_name"] == "Maria"
+    # Should include insurance from FHIR Coverage
+    assert "insurance" in patient
+    # Should include devices from FHIR Device
+    assert "devices" in patient
+    assert len(patient["devices"]) >= 1
+    # Verify device shape
+    dev = patient["devices"][0]
+    assert "manufacturer" in dev
+    assert "model" in dev
+    assert "type" in dev
+
+
+@pytest.mark.asyncio
+async def test_patient_search_by_mrn(client, admin_cookies):
+    """GET /api/dme/patients/search?mrn=PT001 returns the matching patient."""
+    _wire_stub_fhir()
+    resp = await client.get(
+        "/api/dme/patients/search",
+        params={"mrn": "PT001"},
+        cookies=admin_cookies,
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) >= 1
+    assert results[0]["patient_id"] == "PT001"
+
+
+@pytest.mark.asyncio
+async def test_patient_search_returns_order_history(client, admin_cookies):
+    """Patient search includes local DME order history when orders exist."""
+    _wire_stub_fhir()
+    # Create an order for PT001
+    await client.post("/api/dme/admin/orders", cookies=admin_cookies, json={
+        "patient_first_name": "Maria",
+        "patient_last_name": "Garcia",
+        "patient_id": "PT001",
+        "patient_dob": "1975-06-15",
+        "patient_phone": "555-0111",
+        "patient_address": "456 Oak Ln",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Machine",
+        "equipment_description": "ResMed AirSense 11",
+    })
+
+    # Now search for this patient
+    resp = await client.get(
+        "/api/dme/patients/search",
+        params={"mrn": "PT001"},
+        cookies=admin_cookies,
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) >= 1
+    patient = results[0]
+    assert "recent_orders" in patient
+    assert len(patient["recent_orders"]) >= 1
+    order = patient["recent_orders"][0]
+    assert "equipment_category" in order
+    assert "status" in order
+
+
+@pytest.mark.asyncio
+async def test_patient_toggle_refill_on():
+    """patient_toggle_refill enables auto-refill and sets next_replace_date."""
+    from server.services.dme import DMEService, DMEOrderStatus, _save_order
+    svc = DMEService()
+    order = await svc.create_order({
+        "patient_first_name": "Toggle",
+        "patient_last_name": "On",
+        "patient_dob": "1990-03-20",
+        "patient_phone": "555-0300",
+        "patient_address": "300 Elm St",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Mask — Nasal",
+        "equipment_description": "Full Resupply (Nasal)",
+        "auto_replace": False,
+    })
+    # Send confirmation so we get a token
+    order.status = DMEOrderStatus.PATIENT_CONTACTED
+    import secrets
+    token = secrets.token_urlsafe(32)
+    order.confirmation_token = token
+    order.confirmation_sent_at = datetime.now().isoformat()
+    await _save_order(order)
+
+    updated = await svc.patient_toggle_refill(token, auto_replace=True, frequency="quarterly")
+    assert updated is not None
+    assert updated.auto_replace is True
+    assert updated.auto_replace_frequency == "quarterly"
+    assert updated.next_replace_date is not None
+
+
+@pytest.mark.asyncio
+async def test_patient_toggle_refill_off():
+    """patient_toggle_refill disables auto-refill and clears next_replace_date."""
+    from server.services.dme import DMEService, DMEOrderStatus, _save_order
+    svc = DMEService()
+    order = await svc.create_order({
+        "patient_first_name": "Toggle",
+        "patient_last_name": "Off",
+        "patient_dob": "1990-03-20",
+        "patient_phone": "555-0301",
+        "patient_address": "301 Elm St",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Mask — Full Face",
+        "equipment_description": "Full Resupply (Full Face)",
+        "auto_replace": True,
+        "auto_replace_frequency": "quarterly",
+    })
+    order.status = DMEOrderStatus.PATIENT_CONTACTED
+    import secrets
+    token = secrets.token_urlsafe(32)
+    order.confirmation_token = token
+    order.confirmation_sent_at = datetime.now().isoformat()
+    await _save_order(order)
+
+    updated = await svc.patient_toggle_refill(token, auto_replace=False)
+    assert updated is not None
+    assert updated.auto_replace is False
+    assert updated.auto_replace_frequency is None
+    assert updated.next_replace_date is None
+
+
+@pytest.mark.asyncio
+async def test_public_order_cannot_set_auto_refill(client):
+    """POST /api/dme/orders (public) ignores auto_replace — field not in DMEOrderCreate."""
+    resp = await client.post("/api/dme/orders", json={
+        "patient_first_name": "Public",
+        "patient_last_name": "Patient",
+        "patient_dob": "1988-09-10",
+        "patient_phone": "555-0400",
+        "patient_address": "400 Public Way",
+        "patient_city": "San Antonio",
+        "patient_state": "TX",
+        "patient_zip": "78229",
+        "equipment_category": "CPAP Machine",
+        "equipment_description": "Machine Request",
+        "auto_replace": True,  # This should be silently ignored
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    # Public endpoint uses DMEOrderCreate which doesn't have auto_replace field,
+    # so it should default to False from create_order
+    assert data["auto_replace"] is False
+
+
+@pytest.mark.asyncio
+async def test_device_resource_stub():
+    """StubFHIRClient returns Device resources for seeded patients."""
+    from server.fhir.stub_client import StubFHIRClient
+    from server.fhir.resources import DeviceResource
+    from server.fhir.models import Device
+
+    stub = StubFHIRClient()
+    device_res = DeviceResource(stub)
+
+    # PT001 (Maria Garcia) should have 2 devices: CPAP + mask
+    devices = await device_res.search_by_patient("PT001")
+    assert len(devices) == 2
+    types = {d.type.text for d in devices if d.type}
+    assert "CPAP Machine" in types
+    assert "CPAP Mask — Nasal" in types
+
+    # Check manufacturer/model on the CPAP
+    cpap = next(d for d in devices if d.type and d.type.text == "CPAP Machine")
+    assert cpap.manufacturer == "ResMed"
+    assert "AirSense 11" in cpap.modelNumber
+
+    # PT003 should have 1 device (BiPAP)
+    devices_3 = await device_res.search_by_patient("PT003")
+    assert len(devices_3) == 1
+    assert devices_3[0].manufacturer == "ResMed"
+
+    # PT004 should have 2 devices
+    devices_4 = await device_res.search_by_patient("PT004")
+    assert len(devices_4) == 2
+
+    # Non-existent patient should get empty list
+    devices_x = await device_res.search_by_patient("PTXXX")
+    assert devices_x == []

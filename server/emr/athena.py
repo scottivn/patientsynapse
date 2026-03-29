@@ -123,6 +123,13 @@ class AthenaProvider(EMRProvider):
         ]
 
     @property
+    def default_search_params(self) -> dict:
+        """Athena requires ah-practice on all FHIR searches to route to the practice."""
+        if self._s.athena_practice_id:
+            return {"ah-practice": f"Organization/a-1.Practice-{self._s.athena_practice_id}"}
+        return {}
+
+    @property
     def notes(self) -> str:
         return (
             "Athena uses client_secret auth (not JWT). "

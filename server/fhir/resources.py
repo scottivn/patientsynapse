@@ -14,14 +14,23 @@ class PatientResource:
         self.client = client
 
     async def search_by_name_dob(
-        self, family: str, given: str, birthdate: str
+        self, family: str, given: str, birthdate: str = ""
     ) -> List[models.Patient]:
-        """Search for patient by name and DOB. Returns match candidates."""
-        bundle = await self.client.search("Patient", {
-            "family": family,
-            "given": given,
-            "birthdate": birthdate,
-        })
+        """Search for patient by name and DOB. Returns match candidates.
+        Uses 'name' param when only family is provided (Athena requires
+        family to be paired with given, birthdate, or gender)."""
+        params = {}
+        if family and (given or birthdate):
+            params["family"] = family
+            if given:
+                params["given"] = given
+            if birthdate:
+                params["birthdate"] = birthdate
+        elif family:
+            params["name"] = family
+        elif given:
+            params["name"] = given
+        bundle = await self.client.search("Patient", params)
         return [
             models.Patient(**entry["resource"])
             for entry in bundle.get("entry", [])
@@ -110,6 +119,18 @@ class CoverageResource:
         bundle = await self.client.search("Coverage", {"patient": patient_id})
         return [
             models.Coverage(**entry["resource"])
+            for entry in bundle.get("entry", [])
+        ]
+
+
+class DeviceResource:
+    def __init__(self, client: FHIRClient):
+        self.client = client
+
+    async def search_by_patient(self, patient_id: str) -> List[models.Device]:
+        bundle = await self.client.search("Device", {"patient": patient_id})
+        return [
+            models.Device(**entry["resource"])
             for entry in bundle.get("entry", [])
         ]
 

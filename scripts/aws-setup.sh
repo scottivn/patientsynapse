@@ -118,16 +118,94 @@ else
   echo "  WARNING: Hosted zone for $DOMAIN not found. Create DNS records manually."
 fi
 
-# ---- 6. Output summary ----
+# ---- 6. Create IAM role for EC2 (Secrets Manager + Bedrock access) ----
+echo "[6/7] Creating IAM instance profile..."
+ROLE_NAME="patientsynapse-ec2-role"
+
+# Check if role exists
+if aws iam get-role --role-name "$ROLE_NAME" 2>/dev/null; then
+    echo "  IAM role '$ROLE_NAME' already exists, skipping."
+else
+    # Trust policy: allow EC2 to assume this role
+    aws iam create-role \
+        --role-name "$ROLE_NAME" \
+        --assume-role-policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ec2.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        }' \
+        --description "PatientSynapse EC2 - Secrets Manager + Bedrock access"
+
+    # Inline policy: Secrets Manager read + Bedrock invoke
+    aws iam put-role-policy \
+        --role-name "$ROLE_NAME" \
+        --policy-name "patientsynapse-secrets-bedrock" \
+        --policy-document '{
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "SecretsManagerRead",
+                    "Effect": "Allow",
+                    "Action": "secretsmanager:GetSecretValue",
+                    "Resource": "arn:aws:secretsmanager:us-east-1:*:secret:patientsynapse/*"
+                },
+                {
+                    "Sid": "BedrockInvoke",
+                    "Effect": "Allow",
+                    "Action": [
+                        "bedrock:InvokeModel",
+                        "bedrock:InvokeModelWithResponseStream"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        }'
+
+    # Create instance profile and attach role
+    aws iam create-instance-profile --instance-profile-name "$ROLE_NAME" 2>/dev/null || true
+    aws iam add-role-to-instance-profile \
+        --instance-profile-name "$ROLE_NAME" \
+        --role-name "$ROLE_NAME" 2>/dev/null || true
+
+    echo "  Created IAM role: $ROLE_NAME"
+
+    # Wait for IAM propagation
+    echo "  Waiting 10s for IAM propagation..."
+    sleep 10
+fi
+
+# Attach instance profile to EC2
+CURRENT_PROFILE=$(aws ec2 describe-instances \
+    --instance-ids "$INSTANCE_ID" \
+    --region "$REGION" \
+    --query 'Reservations[0].Instances[0].IamInstanceProfile.Arn' \
+    --output text 2>/dev/null || echo "None")
+
+if [[ "$CURRENT_PROFILE" == "None" ]] || [[ -z "$CURRENT_PROFILE" ]]; then
+    aws ec2 associate-iam-instance-profile \
+        --instance-id "$INSTANCE_ID" \
+        --iam-instance-profile Name="$ROLE_NAME" \
+        --region "$REGION"
+    echo "  Attached instance profile to $INSTANCE_ID"
+else
+    echo "  Instance already has an IAM profile: $CURRENT_PROFILE"
+fi
+
+# ---- 7. Output summary ----
 echo ""
 echo "=== Setup Complete ==="
 echo "Instance ID:  $INSTANCE_ID"
 echo "Elastic IP:   $EIP"
 echo "SSH Key:      ~/.ssh/${KEY_NAME}.pem"
 echo "Security Grp: $SG_ID"
+echo "IAM Role:     $ROLE_NAME"
 echo ""
 echo "Next steps:"
 echo "  1. Wait ~2 min for instance to fully boot"
-echo "  2. SSH in:  ssh -i ~/.ssh/${KEY_NAME}.pem ubuntu@$EIP"
-echo "  3. Run:     bash scripts/server-setup.sh"
-echo "  4. Deploy:  bash scripts/deploy.sh"
+echo "  2. Push secrets: bash scripts/setup-secrets.sh --env staging"
+echo "  3. SSH in:  ssh -i ~/.ssh/${KEY_NAME}.pem ubuntu@$EIP"
+echo "  4. Run:     bash scripts/server-setup.sh"
+echo "  5. Deploy:  bash scripts/deploy.sh"

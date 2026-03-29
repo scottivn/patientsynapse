@@ -1,9 +1,39 @@
-"""PatientSynapse configuration via environment variables."""
+"""PatientSynapse configuration via environment variables.
 
+In production, secrets are loaded from AWS Secrets Manager and injected
+into the environment before Pydantic reads them. Non-secret config
+(APP_ENV, LLM_PROVIDER, etc.) still comes from the environment or .env.
+
+Precedence: env vars > Secrets Manager > .env file defaults.
+"""
+
+import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Literal
 from functools import lru_cache
+
+
+def _inject_secrets():
+    """Load secrets from AWS Secrets Manager and set them as env vars.
+
+    Only injects keys that are NOT already set in the environment,
+    so explicit env vars always win. This runs once before Settings
+    is instantiated.
+    """
+    from server.secrets import load_secrets
+    secrets = load_secrets()
+    injected = 0
+    for key, value in secrets.items():
+        upper_key = key.upper()
+        if upper_key not in os.environ:
+            os.environ[upper_key] = str(value)
+            injected += 1
+    if injected:
+        import logging
+        logging.getLogger(__name__).info(
+            f"Injected {injected} secrets from Secrets Manager into environment"
+        )
 
 
 class Settings(BaseSettings):
@@ -21,18 +51,20 @@ class Settings(BaseSettings):
     # Athena-specific settings (used when emr_provider=athena)
     # Set ATHENA_SANDBOX=true to point at preview.platform.athenahealth.com instead of production
     athena_sandbox: bool = Field(default=False)
-    athena_fhir_base_url: str = Field(default="https://api.platform.athenahealth.com/fhir/r4")
+    athena_fhir_base_url: str = Field(default="https://api.platform.athenahealth.com")
     athena_client_id: str = Field(default="")
     athena_client_secret: str = Field(default="")
     athena_authorize_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/authorize")
     athena_token_url: str = Field(default="https://api.platform.athenahealth.com/oauth2/v1/token")
     athena_practice_id: str = Field(default="")
+    athena_brand_id: str = Field(default="1")
+    athena_csg_id: str = Field(default="1")
 
     @property
     def athena_effective_fhir_base_url(self) -> str:
-        if self.athena_sandbox:
-            return "https://api.preview.platform.athenahealth.com/fhir/r4"
-        return self.athena_fhir_base_url
+        # Athena FHIR R4 base — practice routing via ah-practice search param
+        base = "https://api.preview.platform.athenahealth.com" if self.athena_sandbox else self.athena_fhir_base_url
+        return f"{base}/fhir/r4"
 
     @property
     def athena_effective_token_url(self) -> str:
@@ -59,7 +91,7 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-20250514"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
-    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-6-20250929-v1:0"
     bedrock_region: str = "us-east-1"
 
     # App
@@ -88,4 +120,6 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
+    # Inject secrets from AWS SM before Pydantic reads the env
+    _inject_secrets()
     return Settings()

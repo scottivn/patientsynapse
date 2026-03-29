@@ -209,6 +209,24 @@ class Communication(BaseModel):
     sent: Optional[str] = None
 
 
+class Annotation(BaseModel):
+    text: Optional[str] = None
+    time: Optional[str] = None
+    authorReference: Optional[Reference] = None
+
+
+class Device(BaseModel):
+    resourceType: str = "Device"
+    id: Optional[str] = None
+    status: Optional[str] = None          # active | inactive | entered-in-error
+    type: Optional[CodeableConcept] = None
+    manufacturer: Optional[str] = None
+    modelNumber: Optional[str] = None
+    serialNumber: Optional[str] = None
+    patient: Optional[Reference] = None
+    note: List[Annotation] = []
+
+
 # -- Bundle for search results --
 
 class BundleEntry(BaseModel):
