@@ -22,6 +22,7 @@ PHI_ROUTE_PREFIXES = (
     "/api/dme/patients",
     "/api/dme/patient-verify",
     "/api/dme/dashboard",
+    "/api/dme/prior-auth",
     "/api/dme/confirm",
     "/api/prescriptions",
     "/api/scheduling",

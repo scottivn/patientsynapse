@@ -242,6 +242,24 @@ export const rejectDMEConfirmation = (token, reason, callbackRequested) =>
 export const toggleDMERefill = (token, autoReplace, frequency = 'quarterly') =>
   request(`/dme/confirm/${token}/toggle-refill`, { method: 'POST', body: JSON.stringify({ auto_replace: autoReplace, frequency }) });
 export const getDMEExpiringEncounters = (days = 14) => request(`/dme/orders/expiring-encounters?days=${days}`);
+
+// DME Prior Authorization
+export const checkDMEPriorAuth = (orderId) =>
+  request(`/dme/orders/${orderId}/prior-auth/check`, { method: 'POST' });
+export const getDMEPriorAuth = (orderId) =>
+  request(`/dme/orders/${orderId}/prior-auth`);
+export const createDMEPriorAuth = (orderId) =>
+  request(`/dme/orders/${orderId}/prior-auth`, { method: 'POST' });
+export const updateDMEPriorAuth = (authId, data) =>
+  request(`/dme/prior-auth/${authId}`, { method: 'PUT', body: JSON.stringify(data) });
+export const listPendingPriorAuths = () =>
+  request('/dme/prior-auth/pending');
+export const getExpiringPriorAuths = (days = 14) =>
+  request(`/dme/prior-auth/expiring?days=${days}`);
+export const getDMEPriorAuthDashboard = () =>
+  request('/dme/prior-auth/dashboard');
+export const canFulfillDMEOrder = (orderId) =>
+  request(`/dme/orders/${orderId}/prior-auth/can-fulfill`);
 export const processDMEAutoDeliveries = () => request('/dme/process-auto-deliveries', { method: 'POST' });
 export const getDMEReceipt = (orderId) => request(`/dme/orders/${orderId}/receipt`);
 export const getDMEDeliveryTicket = (orderId) => request(`/dme/orders/${orderId}/delivery-ticket`);

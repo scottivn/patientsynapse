@@ -88,8 +88,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"Fax inbox: {inbox_dir} ({len(pending)} files pending)")
 
     # Seed DME demo data (idempotent — skips if orders already exist)
-    from server.api.routes import _dme_service
+    from server.api.routes import _dme_service, _prior_auth_service
     _dme_service.set_fhir_client(fhir_client)
+    _prior_auth_service.set_fhir_client(fhir_client)
     await _dme_service.seed_demo_data()
 
     # Process any auto-refills that came due (creates child orders + sends to patients)

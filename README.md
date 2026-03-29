@@ -117,7 +117,8 @@ Default admin login: `admin` / whatever you set in `ADMIN_DEFAULT_PASSWORD` in `
 ```
 server/
   main.py                     App entry point, lifespan, middleware
-  config.py                   Settings (Pydantic BaseSettings from .env)
+  config.py                   Settings (Pydantic BaseSettings from .env + Secrets Manager)
+  secrets.py                  AWS Secrets Manager client (load_secrets, _get_secret_id)
   db.py                       Centralized DB schema + async helpers (init_all_tables, db_execute, db_fetch_*)
   api/
     routes.py                 All HTTP endpoints (thin handlers)
@@ -151,6 +152,7 @@ server/
     prescription_monitor.py   eCW Rx polling → LLM extraction → DME order creation
     ocr.py                    PDF/image text extraction
     dme.py                    DME order lifecycle management
+    prior_auth.py             DME prior authorization tracking (payer approval before fulfillment)
     referral_auth.py          HMO referral authorization tracking
     allowable_rates.py        Insurance allowable rate lookups
 frontend/
@@ -185,7 +187,9 @@ tests/
     test_user_management.py   User CRUD endpoint tests
   services/
     test_fax_pipeline.py      OCR (PyMuPDF), fax status error counts, retry-failed, path traversal, file serving, page rendering
+    test_prior_auth.py        DME prior authorization lifecycle (check required, create, submit, approve, deny, fulfillment gate, order blocking)
     test_todo_features.py     Fax category expansion, DME patient rejection, auto-deliveries, expiring encounters, receipts, delivery tickets, bundle item selection
+  test_secrets.py             AWS Secrets Manager integration (secret ID resolution, SM fetch, config injection, env var precedence)
 ```
 
 ---
@@ -356,6 +360,32 @@ Indexed on `status`, `confirmation_token` (unique), `auto_replace`.
 
 Indexed on `status`, `patient_id`.
 
+### `prior_auth_requests`
+
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | UUID |
+| dme_order_id | TEXT | FK to `dme_orders.id` |
+| patient_id | TEXT | FHIR Patient reference |
+| patient_first_name / last_name | TEXT | Denormalized from order at creation |
+| payer_name | TEXT | Insurance payer name |
+| payer_member_id | TEXT | Member/subscriber ID |
+| insurance_type | TEXT | hmo, ppo, medicare, epo, pos, unknown |
+| auth_number | TEXT | Payer-assigned authorization number (set on approval) |
+| status | TEXT | pending, submitted, approved, denied, expired, not_required |
+| diagnosis_codes | TEXT (JSON) | Array of ICD-10 codes |
+| hcpcs_codes | TEXT (JSON) | Array of HCPCS codes |
+| request_date | TEXT | When auth was created |
+| submitted_date | TEXT | When submitted to payer |
+| decision_date | TEXT | When payer responded |
+| valid_from / valid_until | TEXT | Approval validity window |
+| denial_reason | TEXT | Payer denial reason |
+| submission_notes | TEXT | Staff notes on submission (e.g., "Faxed to Aetna") |
+| staff_notes | TEXT | General staff notes |
+| created_at / updated_at | TEXT | Timestamps |
+
+Indexed on `dme_order_id`, `status`. One active auth per order enforced at service layer.
+
 ### `prescriptions`
 
 | Column | Type | Notes |
@@ -492,6 +522,21 @@ All endpoints prefixed with `/api`. Auth column: **Admin** = `require_admin`, **
 | POST | `/dme/confirm/{token}` | Public | Submit patient confirmation (address, fulfillment, selected items) |
 | POST | `/dme/confirm/{token}/reject` | Public | Patient flags issue — order → ON_HOLD with reason + optional callback request |
 | POST | `/dme/confirm/{token}/toggle-refill` | Public | Patient auto-refill opt-in/out. Body: `DMERefillToggle` (`auto_replace: bool`, `frequency: str`). Returns `{ status, auto_replace, frequency }`. |
+
+### DME Prior Authorization
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/dme/orders/{order_id}/prior-auth/check` | Admin, DME | Check if prior auth is required for order (uses FHIR Coverage + payer name heuristic × HCPCS rules) |
+| GET | `/dme/orders/{order_id}/prior-auth` | Admin, DME | Get active prior-auth request for order |
+| POST | `/dme/orders/{order_id}/prior-auth` | Admin, DME | Create prior-auth request (populates from order + FHIR data). Returns 400 if active auth already exists |
+| PUT | `/dme/prior-auth/{auth_id}` | Admin, DME | Update auth: `action` = `submit` (pending→submitted), `approve` (submitted→approved, requires `auth_number`), or `deny` (submitted→denied, requires `denial_reason`) |
+| GET | `/dme/orders/{order_id}/prior-auth/can-fulfill` | Admin, DME | Fulfillment check — returns `{ can_proceed, reason }`. Blocks if auth is pending/submitted/denied |
+| GET | `/dme/prior-auth/pending` | Admin, DME | List all pending + submitted auths |
+| GET | `/dme/prior-auth/expiring` | Admin, DME | Approved auths expiring within `?days=` (default 30) |
+| GET | `/dme/prior-auth/dashboard` | Admin, DME | Summary counts by status (pending, approved, denied, submitted, expired) |
+
+**Approval gate:** `POST /dme/orders/{order_id}/approve` returns **409 Conflict** if a blocking prior-auth exists (pending, submitted, or denied). Auth must be approved or absent for order approval to proceed.
 
 ### Referral Authorizations
 
@@ -630,6 +675,39 @@ Manages DME orders from creation through fulfillment. Sleep-medicine focused (CP
 | `generate_receipt(order_id)` | Generate receipt data for fulfilled/shipped order |
 | `generate_delivery_ticket(order_id)` | Generate delivery ticket data for shipped order |
 
+### PriorAuthService (`server/services/prior_auth.py`)
+
+Tracks DME prior authorization requests — payer approval required before equipment fulfillment. Distinct from referral authorizations (HMO visit tracking).
+
+**Auth Lifecycle:** pending → submitted → approved / denied / expired
+
+**Auth-Required Rules Engine:** Maps insurance type × HCPCS codes to determine if prior auth is needed:
+
+| Insurance Type | Prior Auth Required |
+|---|---|
+| HMO | All HCPCS codes |
+| POS | All HCPCS codes |
+| Medicare | E0601 (CPAP), E0470 (BiPAP/ASV) only |
+| EPO | E0601, E0470 only |
+| PPO | Never |
+
+Insurance type is detected from FHIR Coverage `type.coding` first, falling back to payer name heuristic (e.g., "Aetna HMO" → hmo).
+
+| Method | Description |
+|---|---|
+| `check_auth_required(order_id)` | Determine if prior auth is needed (FHIR Coverage + payer name heuristic × HCPCS rules) |
+| `create_auth_request(order_id)` | Create auth from order data — denormalizes patient/payer/codes. Rejects duplicates |
+| `submit_auth(auth_id, notes)` | Mark as submitted to payer (pending → submitted) |
+| `record_decision(auth_id, action, ...)` | Record approve (with auth_number, valid_until) or deny (with denial_reason) |
+| `get_auth_for_order(order_id)` | Get active auth for an order |
+| `get_auths_for_orders(order_ids)` | Batch fetch — avoids N+1 queries on kanban list endpoints |
+| `can_fulfill(order_id)` | Returns `{ can_proceed, reason }` — blocks if auth is pending/submitted/denied |
+| `list_pending()` | All pending + submitted auths |
+| `get_expiring(days)` | Approved auths expiring within N days |
+| `get_dashboard()` | Summary counts by status |
+
+**Approval gate:** `DMEService.approve_order()` calls `can_fulfill()` before allowing status transition. Returns 409 Conflict if blocked.
+
 ### PrescriptionMonitorService (`server/services/prescription_monitor.py`)
 
 Polls eCW FHIR for new DME prescriptions (DocumentReference type `57833-6`), extracts structured data via LLM, matches patients, and auto-creates DME orders. Mirrors the fax ingestion pattern.
@@ -751,7 +829,7 @@ Bedrock uses the Anthropic messages format via `invoke_model` API and requires a
 | `/rcm` | RCM | admin | Revenue cycle dashboard |
 | `/settings` | Settings | admin | EMR/LLM provider switcher, OAuth connect |
 | `/admin/users` | UserManagement | admin | Create/edit/delete users, assign roles |
-| `/dme/admin` | DMEAdmin | admin, dme | Pipeline-based DME workflow (6 queue lanes); vendor dropdown, auto-deliver timer, expiring encounters banner, receipt/delivery ticket generation, patient rejection details, **NewOrderPanel** slide-over (patient search by name+DOB or MRN, FHIR device/insurance/order history display, order creation with category, bundles, diagnosis, auto-refill toggle, new patient form) |
+| `/dme/admin` | DMEAdmin | admin, dme | **Kanban board** DME workflow — 5 columns: New/Review, Awaiting Patient, Confirmed, Ordering, Shipped. On Hold displayed as horizontal bar below. One-click "Approve & Send to Patient" action (blocked by pending prior-auth), rejection presets (compliance/encounter/insurance) with SMS/email notification toggle. Vendor modal with PPM/VGM portal links. Auto-deliver timer, expiring encounters banner, receipt/delivery ticket generation. **Prior Auth section** in order detail: check if required, create auth request, submit to payer, record approval/denial, status badges on kanban cards. **NewOrderPanel** slide-over (patient search by name+DOB or MRN, FHIR device/insurance/order history display, order creation with category, bundles, diagnosis, auto-refill toggle, new patient form) |
 | `/allowable-rates` | AllowableRates | admin, dme | Insurance rate management |
 
 Users who navigate to a route they don't have access to are redirected to their role's landing page (admin → `/`, front_office → `/faxes`, dme → `/dme/admin`).
@@ -778,12 +856,36 @@ New DME functions added:
 | `searchDMEPatients(params)` | `GET /api/dme/patients/search` | Search patients by name+DOB or MRN; returns demographics, insurance, devices, order history |
 | `createAdminDMEOrder(data)` | `POST /api/dme/admin/orders` | Staff-initiated DME order creation (extends standard order with auto-replace, frequency, origin) |
 | `toggleDMERefill(token, data)` | `POST /api/dme/confirm/{token}/toggle-refill` | Patient auto-refill opt-in/out with frequency selection |
+| `checkDMEPriorAuth(orderId)` | `POST /api/dme/orders/{order_id}/prior-auth/check` | Check if prior auth is required for order |
+| `getDMEPriorAuth(orderId)` | `GET /api/dme/orders/{order_id}/prior-auth` | Get active prior-auth request for order |
+| `createDMEPriorAuth(orderId)` | `POST /api/dme/orders/{order_id}/prior-auth` | Create prior-auth request from order data |
+| `updateDMEPriorAuth(authId, data)` | `PUT /api/dme/prior-auth/{auth_id}` | Update auth (submit, approve, deny) |
+| `canFulfillDMEOrder(orderId)` | `GET /api/dme/orders/{order_id}/prior-auth/can-fulfill` | Check if order can proceed (not blocked by auth) |
+| `listPendingPriorAuths()` | `GET /api/dme/prior-auth/pending` | List pending + submitted auths |
+| `getExpiringPriorAuths(days)` | `GET /api/dme/prior-auth/expiring?days=` | Approved auths expiring within N days |
+| `getDMEPriorAuthDashboard()` | `GET /api/dme/prior-auth/dashboard` | Summary counts by status |
 
 ---
 
 ## DME Workflow
 
 Orders originate internally (prescription, auto-refill, staff-initiated, patient request). Patients do not submit orders — they receive a tokenized confirmation link to verify details.
+
+### Kanban Board UI
+
+The DME admin page displays orders as a horizontal kanban board with 5 columns:
+
+| Column | Statuses | Primary Action |
+|---|---|---|
+| **New / Review** | `pending`, `verified`, `approved` | Approve & Send to Patient (one click) |
+| **Awaiting Patient** | `patient_contacted` | Patient Link (view confirmation URL) |
+| **Confirmed** | `patient_confirmed` | Order from Vendor (with portal links) |
+| **Ordering** | `ordering` | Mark Shipped |
+| **Shipped** | `shipped` | Mark Delivered |
+
+**On Hold** orders display as a horizontal bar below the kanban board. **Fulfilled** orders are tracked in summary stats.
+
+Staff verify compliance, encounter, and insurance in the "New / Review" column. One-click "Approve & Send to Patient" chains `approveDMEOrder()` + `sendDMEConfirmation()`. Rejection uses preset reasons (non-compliant CPAP usage, encounter expired, insurance verification failed) with editable text and optional SMS/email notification.
 
 ### Statuses
 
@@ -821,7 +923,7 @@ Shipped orders set `auto_deliver_after` based on fulfillment method:
 
 ### Vendor Selection
 
-When marking an order as ordered, staff select a vendor from a dropdown: **In-House**, **PPM**, **VGM**, or **Other**. This replaces the previous free-text vendor name input.
+When marking an order as ordered, staff select a vendor from a dropdown: **In-House**, **PPM**, **VGM**, or **Other**. For PPM and VGM, the vendor modal displays direct links to their ordering portals so staff can place the order on the vendor's site before marking it as ordered in PatientSynapse.
 
 ### Expiring Encounters Alert
 
@@ -839,6 +941,28 @@ Submitting calls `POST /api/dme/confirm/{token}/reject`, which sets `patient_rej
 ### Bundle Item Selection
 
 Bundle orders (e.g., Full Resupply) include multiple supply items stored in `bundle_items`. On the confirmation page, patients see individual checkboxes for each item and can deselect items they don't need. The selected subset is stored in `selected_items` and used for fulfillment.
+
+### Prior Authorization
+
+Prior authorization is payer approval required before DME fulfillment — distinct from referral authorizations (HMO visit tracking). The system determines if auth is required based on insurance type × HCPCS codes, then tracks the request lifecycle through submission and payer decision.
+
+**Flow:** Create order → Check if auth required → Create auth request → Submit to payer → Record decision → Approve order
+
+**Auth-required rules:**
+
+- **HMO / POS:** All DME equipment requires prior auth
+- **Medicare / EPO:** Only CPAP (E0601) and BiPAP/ASV (E0470)
+- **PPO:** No prior auth required
+
+**Insurance type detection:** First checks FHIR Coverage `type.coding` from the EMR, falls back to payer name heuristic (e.g., "United PPO" → ppo, "Medicare" → medicare).
+
+**Approval gate:** Orders with a blocking prior-auth (pending, submitted, or denied) cannot be approved. The "Approve & Send to Patient" button is disabled on the kanban card and order detail modal. Backend returns 409 Conflict. Approved or absent auth allows order approval to proceed.
+
+**Frontend integration:**
+
+- **Kanban cards** show color-coded prior-auth status badges (pending/submitted/approved/denied/expired)
+- **Order detail modal** includes a Prior Auth section with: check-if-required button, create request, mark submitted (with notes), record approval (auth number + valid_until), record denial (reason), resubmit new request
+- **Action buttons** disabled with "Auth Required" label when auth is blocking
 
 ### Equipment Categories (Sleep Medicine)
 
@@ -860,6 +984,7 @@ Each category maps to HCPCS codes for automatic allowable rate lookups. Common s
 - **TLS** — HSTS in production, TLS 1.3 via nginx + Let's Encrypt
 - **Login rate limiting** — IP-based, 5 failed attempts within 5 minutes triggers 429 lockout. Successful login clears the counter.
 - **Data persistence** — All business entities (referrals, DME orders, referral auths, prescriptions, fax tracking) persisted to SQLite via `server/db.py`. No in-memory-only stores — server restarts preserve all data.
+- **Secrets management** — API keys, passwords, and client credentials stored in AWS Secrets Manager (staging/production). Never committed to code or `.env` on the server. EC2 accesses secrets via IAM instance profile (no API keys on disk). `scripts/setup-secrets.sh` manages the secret lifecycle.
 
 ### Security Headers
 
@@ -880,7 +1005,24 @@ Credentials: enabled. Methods: GET, POST, PUT, DELETE, OPTIONS.
 
 ## Configuration Reference
 
-All settings are loaded from `.env` via Pydantic `BaseSettings` in `server/config.py`.
+Settings are loaded from `.env` via Pydantic `BaseSettings` in `server/config.py`. In staging/production, secrets (API keys, passwords, client credentials) are automatically loaded from AWS Secrets Manager before `Settings` is instantiated.
+
+### Secrets Manager Integration
+
+In `staging` and `production` environments, `server/secrets.py` fetches secrets from AWS Secrets Manager and injects them as environment variables. Precedence: **explicit env vars > Secrets Manager > .env file defaults**.
+
+| Environment | Secret ID | Behavior |
+|---|---|---|
+| `development` | None | SM skipped entirely, all values from `.env` |
+| `staging` | `patientsynapse/staging` | SM secrets loaded, env vars override |
+| `production` | `patientsynapse/production` | SM secrets loaded, env vars override |
+| Any (with override) | `SECRETS_MANAGER_SECRET_ID` | Forces SM lookup in any environment |
+
+**Keys stored in Secrets Manager:** `APP_SECRET_KEY`, `ADMIN_DEFAULT_PASSWORD`, `ECW_CLIENT_ID`, `ECW_JWKS_URL`, `ECW_TOKEN_URL`, `ECW_AUTHORIZE_URL`, `ATHENA_CLIENT_ID`, `ATHENA_CLIENT_SECRET`, `ATHENA_PRACTICE_ID`, `XAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DATABASE_URL`
+
+**Management CLI:** `bash scripts/setup-secrets.sh [--env staging|production] [--show] [--delete]`
+
+### All Settings
 
 | Variable | Default | Description |
 |---|---|---|
@@ -933,7 +1075,9 @@ Tests use an isolated SQLite database (temp file), `USE_STUB_FHIR=true`, and `ht
 | DME Order Lifecycle | `tests/services/test_dme.py` | Create order, list/get/filter orders, approve, reject (with reason), hold/resume, full fulfillment flow (approve→ordered→shipped→fulfilled), confirmation token generation + public validation + patient submission, insurance verification, encounter tracking, compliance updates, document add/remove, dashboard stats, queue endpoints (8 filter views), status filter, encounter types + equipment categories endpoints |
 | Referral Authorizations | `tests/services/test_referral_auth.py` | Create auth, list/get/filter auths, update fields, record visit (count tracking), visits-exhausted status, expired/expiring-soon status computation, request renewal + renewal content, cancel auth, dashboard stats, expiring-soon endpoint, scheduling eligibility (with/without active auth) |
 | System & Rates | `tests/services/test_system_and_rates.py` | System status, EMR/LLM config endpoints, settings require admin, logout, provider search (with specialty filter), insurance verification stub, RCM dashboard + patient billing, allowable rates CRUD (create, lookup, delete, bundle pricing, list payers, 404 on missing), prescription/fax status endpoints, DME patient verify stub |
+| DME Prior Auth | `tests/services/test_prior_auth.py` | 21 tests: auth-required check (HMO required, PPO supplies not required, Medicare CPAP required), create auth request (populates from order, rejects duplicates), submit (pending→submitted, blocks double submit), record approval (auth number + valid_until, clears blocking), record denial (reason, stays blocking), can-fulfill gate (no auth=proceed, pending=blocked, approved=proceed), order approval blocked by pending auth (409), order approval allowed after auth approved, list pending, dashboard counts, order serialization includes prior_auth, all endpoints require auth (401), full end-to-end flow |
 | New Features | `tests/services/test_todo_features.py` | 20 tests: expanded fax document categories (8 types, lab_result→labs_imaging migration), DME patient rejection (POST confirm/{token}/reject, ON_HOLD transition, reason + callback flag), auto-delivery processing (7-day ship timer, immediate pickup), expiring encounters query (≤14 days), receipt + delivery ticket generation, bundle item selection (patient deselects items on confirmation page) |
+| Secrets Manager | `tests/test_secrets.py` | 11 tests: secret ID resolution (None in dev, convention names for staging/production, explicit override, default), secrets loading (empty dict in dev, SM fetch in staging, exit on missing secret), config integration (dev ignores SM, SM injected into env, env var overrides SM value) |
 
 ### Recent Bug Fixes
 
@@ -950,7 +1094,8 @@ Tests use an isolated SQLite database (temp file), `USE_STUB_FHIR=true`, and `ht
 - **Domain:** `patientsynapse.com` (Route53)
 - **Deploy script:** `bash scripts/deploy.sh`
 - **Start instance:** `aws ec2 start-instances --instance-ids <instance-id> --region us-east-1`
-- **IAM role:** EC2 instance role with `AmazonBedrockFullAccess` for HIPAA-eligible LLM access
+- **IAM role:** `patientsynapse-ec2-role` — EC2 instance profile with `secretsmanager:GetSecretValue` (scoped to `patientsynapse/*`) and `bedrock:InvokeModel` / `bedrock:InvokeModelWithResponseStream`
+- **Secrets:** `bash scripts/setup-secrets.sh --env staging` to push secrets from local `.env` to AWS Secrets Manager. `--show` to verify (masked). Instance reads secrets automatically via IAM role when `APP_ENV=staging|production`.
 
 ---
 

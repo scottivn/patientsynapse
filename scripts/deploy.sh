@@ -88,6 +88,7 @@ $SSH_CMD "test -f $APP_DIR/.env" 2>/dev/null || {
   $SCP_CMD .env "$SSH_USER@$SERVER:$APP_DIR/.env"
 }
 echo "  To update .env later: bash scripts/deploy.sh --update-env"
+echo "  Secrets stored in AWS Secrets Manager: bash scripts/setup-secrets.sh --show"
 
 # ---- 4. Copy RSA keys (only if they don't exist on server) ----
 echo "[4/6] Checking RSA keys..."

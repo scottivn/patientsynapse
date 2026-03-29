@@ -13,13 +13,14 @@ import {
   getDMEIncoming, getDMEInProgress,
   getDMEAwaitingPatient, getDMEPatientConfirmed, getDMEOnHold,
   verifyDMEInsurance, approveDMEOrder, rejectDMEOrder, fulfillDMEOrder,
-  updateDMECompliance, holdDMEOrder, resumeDMEOrder,
+  updateDMECompliance, updateDMEEncounter, holdDMEOrder, resumeDMEOrder,
   sendDMEConfirmation, markDMEOrdered, markDMEShipped,
   pollPrescriptions, listPrescriptions,
   getDMEExpiringEncounters, processDMEAutoDeliveries,
   getDMEReceipt, getDMEDeliveryTicket,
   searchDMEPatients, createAdminDMEOrder,
   getDMEProducts, getDMEProductCategories, getDMEVendors,
+  checkDMEPriorAuth, createDMEPriorAuth, updateDMEPriorAuth, getDMEPriorAuthDashboard,
 } from '../services/api'
 
 const STATUS_STYLES = {
@@ -210,16 +211,108 @@ function EmptyState({ icon: Icon, message }) {
 
 // ── Modals ──────────────────────────────────────────────────────
 
+const REJECTION_REASONS = [
+  {
+    key: 'compliance',
+    label: 'Non-Compliant (CPAP Usage)',
+    message: 'Your DME supply order cannot be processed at this time because your CPAP compliance data does not meet the required threshold (minimum 4 hours per night on at least 70% of nights in a 30-day period). Please contact our office to discuss next steps and how to improve your usage to qualify for resupply.',
+  },
+  {
+    key: 'encounter',
+    label: 'Encounter Expired',
+    message: 'Your DME supply order cannot be processed at this time because your last provider encounter has expired. Insurance requires a recent office visit or telehealth appointment on file before we can fulfill supply orders. Please schedule a follow-up appointment with your provider and contact our office once completed.',
+  },
+  {
+    key: 'insurance',
+    label: 'Insurance Verification Failed',
+    message: 'Your DME supply order cannot be processed at this time because we were unable to verify your insurance coverage for this equipment. This may be due to a lapsed policy, a change in coverage, or missing authorization. Please contact our office to update your insurance information so we can reprocess your order.',
+  },
+  {
+    key: 'custom',
+    label: 'Other (custom reason)',
+    message: '',
+  },
+]
+
 function RejectModal({ onConfirm, onCancel }) {
-  const [reason, setReason] = useState('')
+  const [selected, setSelected] = useState('')
+  const [message, setMessage] = useState('')
+  const [sendNotification, setSendNotification] = useState(true)
+  const [sendVia, setSendVia] = useState('sms')
+
+  const handleSelect = (key) => {
+    setSelected(key)
+    const preset = REJECTION_REASONS.find(r => r.key === key)
+    if (preset && preset.message) setMessage(preset.message)
+    else if (key === 'custom') setMessage('')
+  }
+
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-gray-900">Reject Order</h3>
-        <textarea className="input resize-none w-full" rows={3} placeholder="Reason for rejection..." value={reason} onChange={e => setReason(e.target.value)} />
-        <div className="flex gap-2 justify-end">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-gray-900 text-lg">Reject Order</h3>
+
+        {/* Reason presets */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-2">Rejection Reason</label>
+          <div className="space-y-1.5">
+            {REJECTION_REASONS.map(r => (
+              <label key={r.key}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                  selected === r.key ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}>
+                <input type="radio" name="reject-reason" value={r.key} checked={selected === r.key}
+                  onChange={() => handleSelect(r.key)}
+                  className="text-red-600 focus:ring-red-500" />
+                <span className="text-sm font-medium text-gray-700">{r.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Editable message */}
+        {selected && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Message to Patient</label>
+            <textarea className="input resize-none w-full text-sm" rows={4} value={message}
+              onChange={e => setMessage(e.target.value)}
+              placeholder="Enter rejection message..." />
+            <p className="text-[10px] text-gray-400 mt-1">You can edit this message before sending.</p>
+          </div>
+        )}
+
+        {/* Send notification toggle */}
+        {selected && message && (
+          <div className="bg-gray-50 border rounded-lg px-3 py-2.5 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={sendNotification} onChange={e => setSendNotification(e.target.checked)}
+                className="rounded border-gray-300 text-red-600 focus:ring-red-500" />
+              <span className="text-sm font-medium text-gray-700">Send notification to patient</span>
+            </label>
+            {sendNotification && (
+              <div className="flex gap-2 ml-6">
+                {['sms', 'email'].map(method => (
+                  <label key={method} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border cursor-pointer text-xs font-medium transition-colors ${
+                    sendVia === method ? 'bg-red-50 border-red-300 text-red-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}>
+                    <input type="radio" name="send-via" value={method} checked={sendVia === method}
+                      onChange={() => setSendVia(method)} className="sr-only" />
+                    {method === 'sms' ? 'SMS' : 'Email'}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2 justify-end pt-1">
           <button onClick={onCancel} className="btn-secondary text-sm">Cancel</button>
-          <button onClick={() => onConfirm(reason)} className="btn-primary text-sm bg-red-600 hover:bg-red-700">Reject</button>
+          <button
+            onClick={() => onConfirm(message, { sendNotification, sendVia })}
+            className="btn-primary text-sm bg-red-600 hover:bg-red-700"
+            disabled={!selected || !message.trim()}>
+            {sendNotification ? 'Reject & Notify Patient' : 'Reject Order'}
+          </button>
         </div>
       </div>
     </div>
@@ -249,18 +342,36 @@ function VendorModal({ onConfirm, onCancel }) {
   const [customVendor, setCustomVendor] = useState('')
   const [orderId, setOrderId] = useState('')
   const effectiveVendor = vendor === 'Other' ? `Other: ${customVendor}` : vendor
+  const portalUrl = VENDOR_PORTALS[vendor]
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onCancel}>
       <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
         <h3 className="font-semibold text-gray-900">Order from Vendor</h3>
-        <select className="input w-full" value={vendor} onChange={e => setVendor(e.target.value)}>
-          <option value="">Select vendor...</option>
-          {VENDOR_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Vendor</label>
+          <select className="input w-full" value={vendor} onChange={e => setVendor(e.target.value)}>
+            <option value="">Select vendor...</option>
+            {VENDOR_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
         {vendor === 'Other' && (
           <input className="input w-full" placeholder="Vendor name" value={customVendor} onChange={e => setCustomVendor(e.target.value)} />
         )}
-        <input className="input w-full" placeholder="Vendor order ID (optional)" value={orderId} onChange={e => setOrderId(e.target.value)} />
+        {portalUrl && (
+          <a href={portalUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-medium text-sm hover:bg-blue-100 transition-colors">
+            <ExternalLink size={14} /> Open {vendor} Portal
+          </a>
+        )}
+        {vendor === 'In-House' && (
+          <div className="text-xs text-gray-500 bg-gray-50 border rounded-lg px-3 py-2">
+            In-house fulfillment — no external portal needed.
+          </div>
+        )}
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Vendor Order ID {vendor === 'In-House' ? '(optional)' : ''}</label>
+          <input className="input w-full" placeholder="Enter order ID from vendor portal" value={orderId} onChange={e => setOrderId(e.target.value)} />
+        </div>
         <div className="flex gap-2 justify-end">
           <button onClick={onCancel} className="btn-secondary text-sm">Cancel</button>
           <button onClick={() => onConfirm(effectiveVendor, orderId)} className="btn-primary text-sm" disabled={!vendor || (vendor === 'Other' && !customVendor)}>Mark Ordered</button>
@@ -385,7 +496,7 @@ function OrderRow({ order, onAction }) {
     <>
       {modal === 'reject' && (
         <RejectModal
-          onConfirm={async (reason) => { setModal(null); await act(() => onAction('reject', order.id, reason)) }}
+          onConfirm={async (message, notifyOpts) => { setModal(null); await act(() => onAction('reject', order.id, message)) }}
           onCancel={() => setModal(null)}
         />
       )}
@@ -531,6 +642,9 @@ function OrderRow({ order, onAction }) {
               </div>
             )}
 
+            {/* Prior Authorization */}
+            <PriorAuthSection order={order} onRefresh={() => onAction('refresh')} />
+
             {/* Hold reason */}
             {order.hold_reason && (
               <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
@@ -581,36 +695,36 @@ function OrderRow({ order, onAction }) {
                 </button>
               )}
 
-              {/* Verify Insurance — pending or verified */}
-              {['pending', 'verified'].includes(order.status) && (
+              {/* Verify Insurance — new/review orders */}
+              {['pending', 'verified', 'approved'].includes(order.status) && (
                 <button disabled={busy} onClick={() => act(() => onAction('verify', order.id))}
                   className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 flex items-center gap-1.5 disabled:opacity-50">
                   <ShieldCheck size={13} /> Verify Insurance
                 </button>
               )}
 
-              {/* Approve — pending or verified */}
-              {['pending', 'verified'].includes(order.status) && (
-                <button disabled={busy} onClick={() => act(() => onAction('approve', order.id))}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1.5 disabled:opacity-50">
-                  <CheckCircle2 size={13} /> Approve
-                </button>
-              )}
-
-              {/* Send confirmation to patient — approved */}
-              {order.status === 'approved' && (
-                <button disabled={busy} onClick={async () => {
-                  setBusy(true)
-                  try {
-                    const result = await sendDMEConfirmation(order.id, 'sms')
-                    setConfirmationUrl(result.confirmation_url)
-                    setModal('link')
-                    onAction('refresh')
-                  } catch (err) { onAction('error', null, err.message) } finally { setBusy(false) }
-                }}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-cyan-300 text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5 disabled:opacity-50">
-                  <Send size={13} /> Send to Patient
-                </button>
+              {/* Approve & Send to Patient — new/review orders (blocked if prior-auth is pending/denied) */}
+              {['pending', 'verified', 'approved'].includes(order.status) && (
+                order.prior_auth?.is_blocking ? (
+                  <span className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 flex items-center gap-1.5 cursor-not-allowed"
+                    title="Prior authorization required before approval">
+                    <ShieldAlert size={13} /> Auth Required
+                  </span>
+                ) : (
+                  <button disabled={busy} onClick={async () => {
+                    setBusy(true)
+                    try {
+                      if (order.status !== 'approved') await approveDMEOrder(order.id)
+                      const result = await sendDMEConfirmation(order.id, 'sms')
+                      setConfirmationUrl(result.confirmation_url)
+                      setModal('link')
+                      onAction('refresh')
+                    } catch (err) { onAction('error', null, err.message) } finally { setBusy(false) }
+                  }}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 flex items-center gap-1.5 disabled:opacity-50">
+                    <Send size={13} /> Approve & Send to Patient
+                  </button>
+                )
               )}
 
               {/* View patient link — patient_contacted (token already generated) */}
@@ -1265,6 +1379,594 @@ function NewOrderPanel({ open, onClose, onCreated }) {
 }
 
 
+// ── Kanban Board ─────────────────────────────────────────────────
+
+const KANBAN_COLUMNS = [
+  { key: 'new',       label: 'New / Review',     statuses: ['pending', 'verified', 'approved'], icon: Inbox, color: 'amber',   headerBg: 'bg-amber-50',   headerText: 'text-amber-700',   borderColor: 'border-amber-200' },
+  { key: 'awaiting',  label: 'Awaiting Patient', statuses: ['patient_contacted'],      icon: UserCheck,    color: 'cyan',    headerBg: 'bg-cyan-50',    headerText: 'text-cyan-700',    borderColor: 'border-cyan-200' },
+  { key: 'confirmed', label: 'Confirmed',        statuses: ['patient_confirmed'],      icon: ShoppingCart, color: 'emerald', headerBg: 'bg-emerald-50', headerText: 'text-emerald-700', borderColor: 'border-emerald-200' },
+  { key: 'ordering',  label: 'Ordering',         statuses: ['ordering'],               icon: Store,        color: 'blue',    headerBg: 'bg-blue-50',    headerText: 'text-blue-700',    borderColor: 'border-blue-200' },
+  { key: 'shipped',   label: 'Shipped',          statuses: ['shipped'],                icon: Truck,        color: 'indigo',  headerBg: 'bg-indigo-50',  headerText: 'text-indigo-700',  borderColor: 'border-indigo-200' },
+]
+
+// ── Prior Auth section for OrderDetailModal ──
+
+const PA_STATUS_STYLES = {
+  pending:      'bg-amber-50 border-amber-200 text-amber-700',
+  submitted:    'bg-blue-50 border-blue-200 text-blue-700',
+  approved:     'bg-green-50 border-green-200 text-green-700',
+  denied:       'bg-red-50 border-red-200 text-red-700',
+  expired:      'bg-orange-50 border-orange-200 text-orange-700',
+  not_required: 'bg-gray-50 border-gray-200 text-gray-500',
+}
+
+function PriorAuthSection({ order, onRefresh }) {
+  const [checking, setChecking] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [checkResult, setCheckResult] = useState(null)
+  const [authAction, setAuthAction] = useState(null) // 'submit' | 'approve' | 'deny'
+  const [formData, setFormData] = useState({ auth_number: '', valid_until: '', denial_reason: '', submission_notes: '' })
+  const [error, setError] = useState(null)
+
+  const pa = order.prior_auth
+
+  const handleCheck = async () => {
+    setChecking(true); setError(null)
+    try {
+      const result = await checkDMEPriorAuth(order.id)
+      setCheckResult(result)
+    } catch (e) { setError(e.message) }
+    finally { setChecking(false) }
+  }
+
+  const handleCreate = async () => {
+    setCreating(true); setError(null)
+    try {
+      await createDMEPriorAuth(order.id)
+      onRefresh()
+    } catch (e) { setError(e.message) }
+    finally { setCreating(false) }
+  }
+
+  const handleSubmitAction = async () => {
+    setActionBusy(true); setError(null)
+    try {
+      const body = { action: authAction }
+      if (authAction === 'submit') body.submission_notes = formData.submission_notes
+      if (authAction === 'approve') { body.auth_number = formData.auth_number; body.valid_until = formData.valid_until }
+      if (authAction === 'deny') body.denial_reason = formData.denial_reason
+      await updateDMEPriorAuth(pa.id, body)
+      setAuthAction(null)
+      onRefresh()
+    } catch (e) { setError(e.message) }
+    finally { setActionBusy(false) }
+  }
+
+  // Don't show for fulfilled/cancelled/rejected orders
+  if (['fulfilled', 'cancelled', 'rejected'].includes(order.status)) return null
+
+  return (
+    <div className="rounded-lg border px-3 py-2 text-xs space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-gray-700 flex items-center gap-1.5">
+          <ShieldCheck size={13} /> Prior Authorization
+        </span>
+        {!pa && (
+          <button onClick={handleCheck} disabled={checking}
+            className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50">
+            {checking ? 'Checking...' : 'Check if Required'}
+          </button>
+        )}
+      </div>
+
+      {error && <div className="text-red-600 text-xs">{error}</div>}
+
+      {/* Check result (before auth request is created) */}
+      {checkResult && !pa && (
+        <div className={`rounded px-2 py-1.5 border ${checkResult.required ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+          <p className="font-medium">{checkResult.required ? 'Prior Auth Required' : 'Not Required'}</p>
+          <p className="text-gray-600 mt-0.5">{checkResult.reason}</p>
+          {checkResult.required && (
+            <button onClick={handleCreate} disabled={creating}
+              className="mt-1.5 bg-amber-600 text-white px-3 py-1 rounded text-xs hover:bg-amber-700 disabled:opacity-50">
+              {creating ? 'Creating...' : 'Create Auth Request'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Active prior-auth request */}
+      {pa && (
+        <div className={`rounded px-2 py-1.5 border ${PA_STATUS_STYLES[pa.status] || 'bg-gray-50 border-gray-200'}`}>
+          <div className="flex items-center justify-between">
+            <span className="font-medium capitalize">{pa.status.replace('_', ' ')}</span>
+            {pa.auth_number && <span className="text-gray-500">Auth #: {pa.auth_number}</span>}
+          </div>
+          {pa.valid_until && <p className="mt-0.5">Valid until: {pa.valid_until}{pa.days_until_expiry != null && ` (${pa.days_until_expiry}d)`}</p>}
+          {pa.denial_reason && <p className="mt-0.5">Denied: {pa.denial_reason}</p>}
+          {pa.submission_notes && <p className="mt-0.5 text-gray-500">Notes: {pa.submission_notes}</p>}
+          {pa.hcpcs_codes?.length > 0 && <p className="mt-0.5 text-gray-500">HCPCS: {pa.hcpcs_codes.join(', ')}</p>}
+          {pa.diagnosis_codes?.length > 0 && <p className="mt-0.5 text-gray-500">Dx: {pa.diagnosis_codes.join(', ')}</p>}
+
+          {/* Action buttons */}
+          <div className="flex gap-1.5 mt-2">
+            {pa.status === 'pending' && (
+              <button onClick={() => setAuthAction('submit')} className="bg-blue-600 text-white px-2.5 py-1 rounded text-xs hover:bg-blue-700">
+                Mark Submitted
+              </button>
+            )}
+            {(pa.status === 'pending' || pa.status === 'submitted') && (
+              <>
+                <button onClick={() => setAuthAction('approve')} className="bg-green-600 text-white px-2.5 py-1 rounded text-xs hover:bg-green-700">
+                  Record Approval
+                </button>
+                <button onClick={() => setAuthAction('deny')} className="bg-red-600 text-white px-2.5 py-1 rounded text-xs hover:bg-red-700">
+                  Record Denial
+                </button>
+              </>
+            )}
+            {(pa.status === 'denied' || pa.status === 'expired') && (
+              <button onClick={handleCreate} disabled={creating} className="bg-amber-600 text-white px-2.5 py-1 rounded text-xs hover:bg-amber-700 disabled:opacity-50">
+                {creating ? 'Creating...' : 'Resubmit New Request'}
+              </button>
+            )}
+          </div>
+
+          {/* Inline action form */}
+          {authAction && (
+            <div className="mt-2 bg-white rounded border p-2 space-y-1.5">
+              <p className="font-medium text-gray-800 capitalize">{authAction === 'submit' ? 'Submit to Payer' : authAction === 'approve' ? 'Record Approval' : 'Record Denial'}</p>
+              {authAction === 'submit' && (
+                <textarea rows={2} placeholder="Submission notes (optional)"
+                  value={formData.submission_notes} onChange={e => setFormData(f => ({ ...f, submission_notes: e.target.value }))}
+                  className="w-full border rounded px-2 py-1 text-xs" />
+              )}
+              {authAction === 'approve' && (
+                <>
+                  <input type="text" placeholder="Auth number" value={formData.auth_number}
+                    onChange={e => setFormData(f => ({ ...f, auth_number: e.target.value }))}
+                    className="w-full border rounded px-2 py-1 text-xs" />
+                  <input type="date" placeholder="Valid until" value={formData.valid_until}
+                    onChange={e => setFormData(f => ({ ...f, valid_until: e.target.value }))}
+                    className="w-full border rounded px-2 py-1 text-xs" />
+                </>
+              )}
+              {authAction === 'deny' && (
+                <textarea rows={2} placeholder="Denial reason"
+                  value={formData.denial_reason} onChange={e => setFormData(f => ({ ...f, denial_reason: e.target.value }))}
+                  className="w-full border rounded px-2 py-1 text-xs" />
+              )}
+              <div className="flex gap-1.5">
+                <button onClick={handleSubmitAction} disabled={actionBusy}
+                  className="bg-gray-800 text-white px-3 py-1 rounded text-xs hover:bg-gray-900 disabled:opacity-50">
+                  {actionBusy ? 'Saving...' : 'Confirm'}
+                </button>
+                <button onClick={() => setAuthAction(null)} className="text-gray-500 hover:text-gray-700 text-xs px-2">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* No auth and no check done yet */}
+      {!pa && !checkResult && (
+        <p className="text-gray-400">Click "Check if Required" to evaluate prior-auth needs</p>
+      )}
+    </div>
+  )
+}
+
+const CARD_ACTIONS = {
+  pending:           { label: 'Send to Patient',  icon: Send,         action: 'approve-and-send', style: 'bg-cyan-600 hover:bg-cyan-700 text-white' },
+  verified:          { label: 'Send to Patient',  icon: Send,         action: 'approve-and-send', style: 'bg-cyan-600 hover:bg-cyan-700 text-white' },
+  approved:          { label: 'Send to Patient',  icon: Send,         action: 'approve-and-send', style: 'bg-cyan-600 hover:bg-cyan-700 text-white' },
+  patient_contacted: null, // waiting on patient — no primary action
+  patient_confirmed: { label: 'Order',            icon: ShoppingCart, action: 'vendor',           style: 'bg-blue-600 hover:bg-blue-700 text-white' },
+  ordering:          { label: 'Mark Shipped',     icon: Truck,        action: 'ship',             style: 'bg-indigo-600 hover:bg-indigo-700 text-white' },
+  shipped:           { label: 'Delivered',        icon: Package,      action: 'fulfill',          style: 'bg-green-600 hover:bg-green-700 text-white' },
+}
+
+function KanbanCard({ order, onAction, onSelect }) {
+  const [busy, setBusy] = useState(false)
+  const originLabel = ORIGIN_LABEL[order.origin] || order.origin
+  const originStyle = ORIGIN_STYLE[order.origin] || 'bg-gray-50 text-gray-500 border-gray-200'
+  const cardAction = CARD_ACTIONS[order.status]
+  const ActionIcon = cardAction?.icon
+
+  const daysOld = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86400000)
+
+  const handlePrimary = async (e) => {
+    e.stopPropagation()
+    if (!cardAction) return
+    setBusy(true)
+    try {
+      if (['vendor', 'ship', 'approve-and-send'].includes(cardAction.action)) {
+        // These need modals or multi-step — open the detail view
+        onSelect(order)
+      } else {
+        await onAction(cardAction.action, order.id)
+      }
+    } catch (err) {
+      onAction('error', null, err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all group"
+      onClick={() => onSelect(order)}
+    >
+      {/* Patient name + age */}
+      <div className="flex items-start justify-between gap-1 mb-1.5">
+        <span className="font-semibold text-sm text-gray-900 truncate">
+          {order.patient_first_name} {order.patient_last_name}
+        </span>
+        {daysOld > 0 && (
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
+            daysOld > 7 ? 'bg-red-100 text-red-600' : daysOld > 3 ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'
+          }`}>
+            {daysOld}d
+          </span>
+        )}
+      </div>
+
+      {/* Equipment */}
+      <p className="text-xs text-gray-600 truncate mb-2">
+        {order.equipment_description || order.equipment_category || 'DME Order'}
+      </p>
+
+      {/* Badges row */}
+      <div className="flex items-center gap-1 flex-wrap mb-2">
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${originStyle}`}>
+          {originLabel}
+        </span>
+        {order.auto_replace && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-purple-50 text-purple-600 border-purple-200">
+            Auto-Refill
+          </span>
+        )}
+        {order.insurance_verified === true && (
+          <ShieldCheck size={11} className="text-green-500" />
+        )}
+        {order.compliance_status === 'compliant' && (
+          <Activity size={11} className="text-green-500" />
+        )}
+        {order.compliance_status === 'non_compliant' && (
+          <Activity size={11} className="text-red-500" />
+        )}
+        {!order.encounter_current && order.last_encounter_date && (
+          <CalendarClock size={11} className="text-red-500" title="Encounter expired" />
+        )}
+        {/* Prior-auth badges */}
+        {order.prior_auth?.status === 'pending' && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-amber-50 text-amber-600 border-amber-200">Auth Pending</span>
+        )}
+        {order.prior_auth?.status === 'submitted' && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border font-medium bg-blue-50 text-blue-600 border-blue-200">Auth Submitted</span>
+        )}
+        {order.prior_auth?.status === 'approved' && (
+          <ShieldCheck size={11} className="text-emerald-500" title={`Prior Auth Approved: ${order.prior_auth.auth_number || ''}`} />
+        )}
+        {order.prior_auth?.status === 'denied' && (
+          <ShieldAlert size={11} className="text-red-500" title={`Prior Auth Denied: ${order.prior_auth.denial_reason || ''}`} />
+        )}
+        {order.prior_auth?.status === 'expired' && (
+          <ShieldAlert size={11} className="text-orange-500" title="Prior Auth Expired" />
+        )}
+      </div>
+
+      {/* Primary action button — blocked if prior-auth is pending/submitted/denied */}
+      {cardAction && order.prior_auth?.is_blocking ? (
+        <button
+          disabled
+          className="w-full text-xs font-medium py-1.5 rounded flex items-center justify-center gap-1.5 bg-gray-100 text-gray-400 cursor-not-allowed"
+          title="Prior authorization required before approval"
+        >
+          <ShieldAlert size={11} /> Auth Required
+        </button>
+      ) : cardAction && (
+        <button
+          disabled={busy}
+          onClick={handlePrimary}
+          className={`w-full text-xs font-medium py-1.5 rounded flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${cardAction.style}`}
+        >
+          {busy ? <RefreshCw size={11} className="animate-spin" /> : <ActionIcon size={11} />}
+          {cardAction.label}
+        </button>
+      )}
+      {!cardAction && order.status === 'patient_contacted' && order.confirmation_token && (
+        <button
+          onClick={(e) => { e.stopPropagation(); window.open(`/dme/confirm/${order.confirmation_token}`, '_blank') }}
+          className="w-full text-xs font-medium py-1.5 rounded flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+        >
+          <ExternalLink size={11} /> View Patient Page
+        </button>
+      )}
+    </div>
+  )
+}
+
+function OrderDetailModal({ order, onAction, onClose }) {
+  const [busy, setBusy] = useState(false)
+  const [modal, setModal] = useState(null)
+  const [confirmationUrl, setConfirmationUrl] = useState('')
+
+  const act = async (fn) => {
+    setBusy(true)
+    try { await fn() } finally { setBusy(false) }
+  }
+
+  if (!order) return null
+
+  const statusStyle = STATUS_STYLES[order.status] || 'bg-gray-100 text-gray-600'
+  const originLabel = ORIGIN_LABEL[order.origin] || order.origin
+  const originStyle = ORIGIN_STYLE[order.origin] || 'bg-gray-50 text-gray-500 border-gray-200'
+
+  return (
+    <>
+      {modal === 'reject' && (
+        <RejectModal
+          onConfirm={async (message, notifyOpts) => { setModal(null); await act(() => onAction('reject', order.id, message)) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'hold' && (
+        <HoldModal
+          onConfirm={async (reason) => { setModal(null); await act(() => onAction('hold', order.id, reason)) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'vendor' && (
+        <VendorModal
+          onConfirm={async (v, oid) => { setModal(null); await act(() => onAction('mark-ordered', order.id, { vendor: v, orderId: oid })) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'ship' && (
+        <ShipModal
+          isPickup={order.fulfillment_method === 'pickup'}
+          onConfirm={async (t, c, d) => { setModal(null); await act(() => onAction('mark-shipped', order.id, { tracking: t, carrier: c, date: d })) }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'link' && (
+        <ConfirmationLinkModal url={confirmationUrl} onClose={() => setModal(null)} />
+      )}
+      {modal === 'encounter' && (
+        <EncounterModal
+          order={order}
+          onConfirm={async (date, type, provider, npi) => {
+            setModal(null)
+            await act(() => onAction('update-encounter', order.id, { date, type, provider, npi }))
+          }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+      {modal === 'compliance' && (
+        <ComplianceModal
+          order={order}
+          onConfirm={async (data) => {
+            setModal(null)
+            await act(() => onAction('check-compliance', order.id, data))
+          }}
+          onCancel={() => setModal(null)}
+        />
+      )}
+
+      <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-40" onClick={onClose}>
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          {/* Header */}
+          <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between z-10 rounded-t-2xl">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h2 className="text-lg font-bold text-gray-900">{order.patient_first_name} {order.patient_last_name}</h2>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusStyle}`}>{STATUS_LABEL[order.status] || order.status}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${originStyle}`}>{originLabel}</span>
+              <ComplianceBadge order={order} />
+              <EncounterBadge order={order} />
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600">
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Body — reuses OrderRow detail content */}
+          <div className="px-5 py-4 space-y-4">
+            <p className="text-sm text-gray-500">
+              {order.equipment_category}{order.equipment_description ? ` — ${order.equipment_description}` : ''}
+              {' · '}#{order.id}{' · '}{new Date(order.created_at).toLocaleDateString()}
+            </p>
+
+            {/* Patient + Insurance details */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+              <DetailItem label="DOB" value={order.patient_dob || '—'} />
+              <DetailItem label="Phone" value={order.patient_phone || '—'} />
+              <DetailItem label="Email" value={order.patient_email || '—'} />
+              <DetailItem label="Address" value={[order.patient_address, order.patient_city, order.patient_state, order.patient_zip].filter(Boolean).join(', ') || '—'} />
+              <DetailItem label="Insurance" value={order.insurance_payer || '—'} />
+              <DetailItem label="Member ID" value={order.insurance_member_id || '—'} />
+              <DetailItem label="Diagnosis" value={order.diagnosis_code ? `${order.diagnosis_code} — ${order.diagnosis_description}` : '—'} />
+              <DetailItem label="Referring Physician" value={order.referring_physician || '—'} />
+              <DetailItem label="HCPCS Codes" value={order.hcpcs_codes?.join(', ') || '—'} />
+              {order.expected_reimbursement != null && (
+                <DetailItem label="Expected Reimbursement" value={`$${order.expected_reimbursement.toFixed(2)}`} />
+              )}
+              {order.fulfillment_method !== 'not_selected' && (
+                <DetailItem label="Fulfillment" value={order.fulfillment_method === 'ship' ? 'Ship to patient' : 'Office pickup'} />
+              )}
+              {order.vendor_name && <DetailItem label="Vendor" value={`${order.vendor_name} (${order.vendor_order_id || 'no order #'})`} />}
+              {order.shipping_tracking_number && <DetailItem label="Tracking" value={`${order.shipping_carrier || ''} ${order.shipping_tracking_number}`} />}
+            </div>
+
+            {/* Info cards */}
+            {order.compliance_status !== 'unknown' && order.compliance_status !== 'not_applicable' && (
+              <div className={`rounded-lg px-3 py-2 text-xs border flex items-start gap-2 ${COMPLIANCE_STYLES[order.compliance_status]}`}>
+                <Activity size={14} className="mt-0.5" />
+                <div>
+                  <span className="font-medium">{COMPLIANCE_LABEL[order.compliance_status]}</span>
+                  {order.compliance_avg_hours != null && <span> — Avg {order.compliance_avg_hours.toFixed(1)} hrs/night</span>}
+                  {order.compliance_days_met != null && order.compliance_total_days != null && (
+                    <span> · {order.compliance_days_met}/{order.compliance_total_days} days ≥4hrs</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {order.last_encounter_date && (
+              <div className={`rounded-lg px-3 py-2 text-xs border flex items-start gap-2 ${
+                order.encounter_current ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-red-50 border-red-200 text-red-700'
+              }`}>
+                <CalendarClock size={14} className="mt-0.5" />
+                <div>
+                  <span className="font-medium">Last Encounter: </span>
+                  {ENCOUNTER_TYPE_LABELS[order.last_encounter_type] || order.last_encounter_type}
+                  {' on '}{new Date(order.last_encounter_date + 'T00:00:00').toLocaleDateString()}
+                  {order.last_encounter_provider && <span> with {order.last_encounter_provider}</span>}
+                </div>
+              </div>
+            )}
+            {!order.last_encounter_date && (
+              <div className="rounded-lg px-3 py-2 text-xs border flex items-start gap-2 bg-red-50 border-red-200 text-red-700">
+                <CalendarClock size={14} className="mt-0.5" />
+                <span><span className="font-medium">No encounter on file</span> — patient needs a provider visit</span>
+              </div>
+            )}
+
+            {order.insurance_notes && (
+              <div className={`rounded-lg px-3 py-2 text-xs border flex items-start gap-2 ${
+                order.insurance_verified === true ? 'bg-green-50 border-green-200 text-green-700'
+                : order.insurance_verified === false ? 'bg-red-50 border-red-200 text-red-700'
+                : 'bg-yellow-50 border-yellow-200 text-yellow-700'
+              }`}>
+                {order.insurance_verified === true ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+                <span>{order.insurance_notes}</span>
+              </div>
+            )}
+
+            {order.hold_reason && (
+              <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                <span className="font-medium">On hold: </span>{order.hold_reason}
+              </div>
+            )}
+            {order.patient_notes && (
+              <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                <span className="font-medium">Patient notes: </span>{order.patient_notes}
+              </div>
+            )}
+            {order.rejection_reason && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                <span className="font-medium">Rejected: </span>{order.rejection_reason}
+              </div>
+            )}
+            {order.patient_rejected && (
+              <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                <span className="font-medium">Patient flagged issue: </span>{order.patient_rejection_reason || 'No details provided'}
+                {order.patient_callback_requested && (
+                  <span className="ml-2 font-medium text-orange-800">— Callback requested</span>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-2 pt-2 border-t">
+              {!['rejected', 'fulfilled', 'cancelled'].includes(order.status) && (
+                <>
+                  <button disabled={busy} onClick={() => setModal('compliance')}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-purple-300 text-purple-700 hover:bg-purple-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <Activity size={13} /> Check Compliance
+                  </button>
+                  <button disabled={busy} onClick={() => setModal('encounter')}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <CalendarClock size={13} /> Update Encounter
+                  </button>
+                </>
+              )}
+              {['pending', 'verified', 'approved'].includes(order.status) && (
+                <>
+                  <button disabled={busy} onClick={() => act(() => onAction('verify', order.id))}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50 flex items-center gap-1.5 disabled:opacity-50">
+                    <ShieldCheck size={13} /> Verify Insurance
+                  </button>
+                  {order.prior_auth?.is_blocking ? (
+                    <span className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-400 flex items-center gap-1.5 cursor-not-allowed"
+                      title="Prior authorization required before approval">
+                      <ShieldAlert size={13} /> Auth Required
+                    </span>
+                  ) : (
+                    <button disabled={busy} onClick={async () => {
+                      setBusy(true)
+                      try {
+                        if (order.status !== 'approved') await approveDMEOrder(order.id)
+                        const result = await sendDMEConfirmation(order.id, 'sms')
+                        setConfirmationUrl(result.confirmation_url)
+                        setModal('link')
+                        onAction('refresh')
+                      } catch (err) { onAction('error', null, err.message) } finally { setBusy(false) }
+                    }}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 flex items-center gap-1.5 disabled:opacity-50">
+                      <Send size={13} /> Approve & Send to Patient
+                    </button>
+                  )}
+                </>
+              )}
+              {order.status === 'patient_contacted' && order.confirmation_token && (
+                <button onClick={() => {
+                  setConfirmationUrl(`${window.location.origin}/dme/confirm/${order.confirmation_token}`)
+                  setModal('link')
+                }}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-cyan-300 text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5">
+                  <ExternalLink size={13} /> Patient Link
+                </button>
+              )}
+              {order.status === 'patient_confirmed' && (
+                <button disabled={busy} onClick={() => setModal('vendor')}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-50">
+                  <ShoppingCart size={13} /> Order from Vendor
+                </button>
+              )}
+              {order.status === 'ordering' && (
+                <button disabled={busy} onClick={() => setModal('ship')}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5 disabled:opacity-50">
+                  {order.fulfillment_method === 'pickup' ? <Store size={13} /> : <Truck size={13} />}
+                  {order.fulfillment_method === 'pickup' ? 'Ready for Pickup' : 'Mark Shipped'}
+                </button>
+              )}
+              {order.status === 'shipped' && (
+                <button disabled={busy} onClick={() => act(() => onAction('fulfill', order.id))}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 flex items-center gap-1.5 disabled:opacity-50">
+                  <Package size={13} /> Mark Delivered
+                </button>
+              )}
+              {order.status === 'on_hold' && (
+                <button disabled={busy} onClick={() => act(() => onAction('resume', order.id))}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <Play size={13} /> Resume
+                </button>
+              )}
+              {!['rejected', 'fulfilled', 'cancelled', 'on_hold'].includes(order.status) && (
+                <button disabled={busy} onClick={() => setModal('hold')}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-orange-300 text-orange-600 hover:bg-orange-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <PauseCircle size={13} /> Hold
+                </button>
+              )}
+              {!['rejected', 'fulfilled', 'cancelled'].includes(order.status) && (
+                <button disabled={busy} onClick={() => setModal('reject')}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 flex items-center gap-1.5 disabled:opacity-50">
+                  <XCircle size={13} /> Reject
+                </button>
+              )}
+              {busy && <RefreshCw size={14} className="animate-spin text-gray-400 self-center" />}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+
 // ── Main component ───────────────────────────────────────────────
 
 const LANES = [
@@ -1288,6 +1990,7 @@ export default function DMEAdmin() {
   const [error, setError] = useState(null)
   const [expiringEncounters, setExpiringEncounters] = useState([])
   const [newOrderOpen, setNewOrderOpen] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState(null)
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -1318,6 +2021,11 @@ export default function DMEAdmin() {
     try {
       if (action === 'verify')           await verifyDMEInsurance(orderId)
       if (action === 'approve')          await approveDMEOrder(orderId)
+      if (action === 'approve-and-send') {
+        // Approve then immediately send confirmation to patient
+        await approveDMEOrder(orderId)
+        await sendDMEConfirmation(orderId, 'sms')
+      }
       if (action === 'reject')           await rejectDMEOrder(orderId, extra)
       if (action === 'fulfill')          await fulfillDMEOrder(orderId)
       if (action === 'hold')             await holdDMEOrder(orderId, extra)
@@ -1410,10 +2118,12 @@ export default function DMEAdmin() {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-        {LANES.map(l => (
-          <StatCard key={l.key} label={l.label} value={laneCount(l.key)} icon={l.icon} variant={l.variant} />
-        ))}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+        {KANBAN_COLUMNS.map(col => {
+          const count = allOrders.filter(o => col.statuses.includes(o.status)).length
+          return <StatCard key={col.key} label={col.label} value={count} icon={col.icon} variant={col.color} />
+        })}
+        <StatCard label="On Hold" value={allOrders.filter(o => o.status === 'on_hold').length} icon={PauseCircle} variant="orange" />
         <StatCard label="Fulfilled" value={d.fulfilled ?? '—'} icon={Archive} variant="default"
           onClick={() => { setActiveView('all_orders'); setAllFilter('fulfilled') }} />
       </div>
@@ -1494,27 +2204,82 @@ export default function DMEAdmin() {
         </div>
       )}
 
+      {/* Order detail modal */}
+      {selectedOrder && (
+        <OrderDetailModal
+          order={selectedOrder}
+          onAction={(...args) => { handleAction(...args); setSelectedOrder(null) }}
+          onClose={() => setSelectedOrder(null)}
+        />
+      )}
+
       {activeView === 'inventory' ? (
         <DMEInventory />
       ) : loading ? (
         <p className="text-gray-400 text-center py-12">Loading...</p>
       ) : activeView === 'pipeline' ? (
-        <div className="space-y-8">
-          {LANES.map(lane => {
-            const orders = lanes[lane.key] || []
-            return (
-              <section key={lane.key}>
-                <SectionHeader icon={lane.icon} title={lane.label} count={orders.length} color={lane.color} />
-                {orders.length === 0 ? (
-                  <EmptyState icon={lane.icon} message={`No orders in ${lane.label.toLowerCase()}`} />
-                ) : (
-                  <div className="space-y-2">
-                    {orders.map(o => <OrderRow key={o.id} order={o} onAction={handleAction} />)}
+        <div className="space-y-4">
+          {/* Kanban board */}
+          <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: '400px' }}>
+            {KANBAN_COLUMNS.map(col => {
+              const orders = allOrders.filter(o => col.statuses.includes(o.status))
+              const ColIcon = col.icon
+              return (
+                <div key={col.key} className={`flex-shrink-0 w-56 rounded-xl border ${col.borderColor} bg-gray-50/50 flex flex-col`}>
+                  {/* Column header */}
+                  <div className={`px-3 py-2.5 rounded-t-xl ${col.headerBg} border-b ${col.borderColor} flex items-center gap-2`}>
+                    <ColIcon size={14} className={col.headerText} />
+                    <span className={`text-sm font-semibold ${col.headerText}`}>{col.label}</span>
+                    <span className={`ml-auto text-xs font-bold ${col.headerText} bg-white/60 px-1.5 py-0.5 rounded-full`}>
+                      {orders.length}
+                    </span>
                   </div>
-                )}
-              </section>
+                  {/* Cards */}
+                  <div className="flex-1 p-2 space-y-2 overflow-y-auto" style={{ maxHeight: '600px' }}>
+                    {orders.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-6">No orders</p>
+                    ) : (
+                      orders.map(o => (
+                        <KanbanCard key={o.id} order={o} onAction={handleAction} onSelect={setSelectedOrder} />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* On Hold — collapsed row below the board */}
+          {(() => {
+            const holdOrders = allOrders.filter(o => o.status === 'on_hold')
+            if (holdOrders.length === 0) return null
+            return (
+              <div className="border border-orange-200 rounded-xl bg-orange-50/50">
+                <div className="px-4 py-2.5 flex items-center gap-2 border-b border-orange-200">
+                  <PauseCircle size={14} className="text-orange-600" />
+                  <span className="text-sm font-semibold text-orange-700">On Hold</span>
+                  <span className="text-xs font-bold text-orange-600 bg-white/60 px-1.5 py-0.5 rounded-full">{holdOrders.length}</span>
+                </div>
+                <div className="p-2 flex gap-2 flex-wrap">
+                  {holdOrders.map(o => (
+                    <div key={o.id}
+                      className="bg-white rounded-lg border border-orange-200 px-3 py-2 cursor-pointer hover:shadow-md transition-all flex items-center gap-3"
+                      onClick={() => setSelectedOrder(o)}
+                    >
+                      <div>
+                        <span className="font-medium text-sm text-gray-900">{o.patient_first_name} {o.patient_last_name}</span>
+                        <p className="text-xs text-gray-500 truncate max-w-48">{o.equipment_description || o.equipment_category}</p>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); handleAction('resume', o.id) }}
+                        className="text-xs px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50 flex items-center gap-1 shrink-0">
+                        <Play size={11} /> Resume
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )
-          })}
+          })()}
         </div>
       ) : (
         <div className="space-y-4">
@@ -1541,14 +2306,11 @@ export default function DMEAdmin() {
       {/* Workflow guide */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
         <h3 className="font-medium text-blue-800 text-sm mb-1">DME Supply Workflow</h3>
-        <ol className="text-sm text-blue-600 leading-relaxed list-decimal list-inside space-y-1">
-          <li>New orders appear in the <strong>New Orders</strong> lane</li>
-          <li>Check compliance (AirPM) and verify insurance coverage</li>
-          <li><strong>Approve</strong>, then <strong>Send to Patient</strong> — generates a confirmation link</li>
-          <li>Patient confirms address and chooses pickup or shipping</li>
-          <li><strong>Order from Vendor</strong> when patient confirms, then track through delivery</li>
-          <li>Auto-refills are sent to patients automatically when due — look for the <span className="text-purple-600 font-medium">Auto Refill</span> badge in Awaiting Patient</li>
-        </ol>
+        <p className="text-sm text-blue-600 leading-relaxed">
+          Orders flow left to right: <strong>New</strong> → <strong>Approved</strong> → <strong>Awaiting Patient</strong> → <strong>Confirmed</strong> → <strong>Ordering</strong> → <strong>Shipped</strong> → Fulfilled.
+          Click any card for full details and actions. The primary action button on each card advances it to the next stage.
+          Auto-refills show a <span className="text-purple-600 font-medium">purple badge</span>. Red age badges mean the order is over 7 days old.
+        </p>
       </div>
 
       {/* New Order slide-over panel */}

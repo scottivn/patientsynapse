@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Package, AlertTriangle, RefreshCw, Plus, Minus, Search } from 'lucide-react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Package, AlertTriangle, RefreshCw, Plus, Search, ChevronDown } from 'lucide-react'
 import { getDMEInventory, updateDMEInventory, restockDMEInventory } from '../services/api'
 import ErrorBanner from './ErrorBanner'
 
@@ -8,6 +8,35 @@ const CATEGORY_COLORS = {
   Masks: 'bg-purple-100 text-purple-700',
   'Replacement Parts': 'bg-amber-100 text-amber-700',
   Accessories: 'bg-gray-100 text-gray-700',
+}
+
+/** Group flat inventory rows into one entry per product with size variants. */
+function groupByProduct(items) {
+  const map = new Map()
+  for (const item of items) {
+    if (!map.has(item.product_id)) {
+      map.set(item.product_id, {
+        product_id: item.product_id,
+        product_name: item.product_name,
+        hcpcs_code: item.hcpcs_code,
+        category: item.category,
+        sizes: [],
+      })
+    }
+    map.get(item.product_id).sizes.push(item)
+  }
+  // Compute aggregates
+  for (const group of map.values()) {
+    const hasSizes = group.sizes.length > 1 || group.sizes[0]?.size !== ''
+    group.has_sizes = hasSizes
+    group.total_qty = group.sizes.reduce((sum, s) => sum + s.quantity, 0)
+    group.any_out = group.sizes.some(s => s.quantity === 0)
+    group.any_low = group.sizes.some(s => s.quantity > 0 && s.quantity <= s.reorder_point)
+    group.all_in_stock = !group.any_out && !group.any_low
+    group.sizes_out = group.sizes.filter(s => s.quantity === 0).length
+    group.sizes_low = group.sizes.filter(s => s.quantity > 0 && s.quantity <= s.reorder_point).length
+  }
+  return [...map.values()]
 }
 
 export default function DMEInventory() {
@@ -19,6 +48,7 @@ export default function DMEInventory() {
   const [searchTerm, setSearchTerm] = useState('')
   const [editing, setEditing] = useState(null) // { id, quantity, reorder_point }
   const [restocking, setRestocking] = useState(null) // { id, quantity }
+  const [selectedSizes, setSelectedSizes] = useState({}) // { product_id: size_index }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -59,23 +89,47 @@ export default function DMEInventory() {
     }
   }
 
+  // Group items by product and apply filters
+  const { groups, categories } = useMemo(() => {
+    if (!data) return { groups: [], categories: [] }
+    const { items } = data
+    const cats = [...new Set(items.map(i => i.category))]
+
+    let filteredItems = items
+    if (categoryFilter !== 'all') filteredItems = filteredItems.filter(i => i.category === categoryFilter)
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      filteredItems = filteredItems.filter(i =>
+        i.product_name.toLowerCase().includes(term) ||
+        i.hcpcs_code.toLowerCase().includes(term) ||
+        i.size.toLowerCase().includes(term)
+      )
+    }
+
+    let grouped = groupByProduct(filteredItems)
+
+    // Filter groups by stock status
+    if (filter === 'low') grouped = grouped.filter(g => g.any_low)
+    if (filter === 'out') grouped = grouped.filter(g => g.any_out)
+
+    return { groups: grouped, categories: cats }
+  }, [data, filter, categoryFilter, searchTerm])
+
   if (loading) return <p className="text-gray-400 text-center py-12">Loading inventory...</p>
   if (!data) return null
 
-  const { items, summary } = data
-  const categories = [...new Set(items.map(i => i.category))]
+  const { summary } = data
 
-  let filtered = items
-  if (filter === 'low') filtered = filtered.filter(i => i.quantity > 0 && i.quantity <= i.reorder_point)
-  if (filter === 'out') filtered = filtered.filter(i => i.quantity === 0)
-  if (categoryFilter !== 'all') filtered = filtered.filter(i => i.category === categoryFilter)
-  if (searchTerm) {
-    const term = searchTerm.toLowerCase()
-    filtered = filtered.filter(i =>
-      i.product_name.toLowerCase().includes(term) ||
-      i.hcpcs_code.toLowerCase().includes(term) ||
-      i.size.toLowerCase().includes(term)
-    )
+  const getSelectedSize = (group) => {
+    const idx = selectedSizes[group.product_id] || 0
+    return group.sizes[idx] || group.sizes[0]
+  }
+
+  const setSelectedSizeIdx = (productId, idx) => {
+    setSelectedSizes(prev => ({ ...prev, [productId]: idx }))
+    // Clear edit/restock state when switching sizes
+    setEditing(null)
+    setRestocking(null)
   }
 
   return (
@@ -124,7 +178,7 @@ export default function DMEInventory() {
         </button>
       </div>
 
-      {/* Inventory table */}
+      {/* Inventory table — consolidated by product */}
       <div className="overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
@@ -139,32 +193,63 @@ export default function DMEInventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtered.map(item => {
-              const isEditing = editing?.id === item.id
-              const isRestocking = restocking?.id === item.id
-              const outOfStock = item.quantity === 0
-              const lowStock = item.quantity > 0 && item.quantity <= item.reorder_point
+            {groups.map(group => {
+              const current = getSelectedSize(group)
+              const isEditing = editing?.id === current.id
+              const isRestocking = restocking?.id === current.id
+              const outOfStock = current.quantity === 0
+              const lowStock = current.quantity > 0 && current.quantity <= current.reorder_point
 
               return (
-                <tr key={item.id} className={`${
+                <tr key={group.product_id} className={`${
                   outOfStock ? 'bg-red-50/50' : lowStock ? 'bg-amber-50/50' : 'hover:bg-gray-50'
                 }`}>
+                  {/* Product name + category badge + total stock */}
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_COLORS[item.category] || 'bg-gray-100 text-gray-600'}`}>
-                        {item.category}
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${CATEGORY_COLORS[group.category] || 'bg-gray-100 text-gray-600'}`}>
+                        {group.category}
                       </span>
-                      <span className="font-medium text-gray-900">{item.product_name}</span>
+                      <span className="font-medium text-gray-900">{group.product_name}</span>
+                      {group.has_sizes && (
+                        <span className="text-xs text-gray-400 shrink-0" title="Total across all sizes">
+                          ({group.total_qty} total)
+                        </span>
+                      )}
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{item.hcpcs_code}</td>
+
+                  {/* HCPCS */}
+                  <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{group.hcpcs_code}</td>
+
+                  {/* Size dropdown or dash */}
                   <td className="px-3 py-2.5">
-                    {item.size ? (
-                      <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-xs font-medium">{item.size}</span>
+                    {group.has_sizes ? (
+                      <div className="relative inline-block">
+                        <select
+                          value={selectedSizes[group.product_id] || 0}
+                          onChange={e => setSelectedSizeIdx(group.product_id, parseInt(e.target.value))}
+                          className="appearance-none pl-2 pr-6 py-0.5 rounded border border-gray-200 bg-white text-xs font-medium text-gray-700 cursor-pointer focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          {group.sizes.map((s, i) => {
+                            const sOut = s.quantity === 0
+                            const sLow = s.quantity > 0 && s.quantity <= s.reorder_point
+                            const indicator = sOut ? ' (OUT)' : sLow ? ' (LOW)' : ''
+                            return (
+                              <option key={s.id} value={i}>
+                                {s.size}{indicator}
+                              </option>
+                            )
+                          })}
+                        </select>
+                        <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      </div>
                     ) : (
                       <span className="text-gray-300">—</span>
                     )}
                   </td>
+
+                  {/* Quantity for selected size */}
                   <td className="px-3 py-2.5 text-center">
                     {isEditing ? (
                       <input type="number" min="0" value={editing.quantity}
@@ -172,32 +257,47 @@ export default function DMEInventory() {
                         className="w-16 text-center border rounded px-1 py-0.5 text-sm" autoFocus />
                     ) : (
                       <span className={`font-bold ${outOfStock ? 'text-red-600' : lowStock ? 'text-amber-600' : 'text-gray-900'}`}>
-                        {item.quantity}
+                        {current.quantity}
                       </span>
                     )}
                   </td>
+
+                  {/* Reorder point for selected size */}
                   <td className="px-3 py-2.5 text-center">
                     {isEditing ? (
                       <input type="number" min="0" value={editing.reorder_point}
                         onChange={e => setEditing({ ...editing, reorder_point: e.target.value })}
                         className="w-16 text-center border rounded px-1 py-0.5 text-sm" />
                     ) : (
-                      <span className="text-gray-500">{item.reorder_point}</span>
+                      <span className="text-gray-500">{current.reorder_point}</span>
                     )}
                   </td>
+
+                  {/* Status — selected size + aggregate indicator */}
                   <td className="px-3 py-2.5">
-                    {outOfStock ? (
-                      <span className="flex items-center gap-1 text-red-600 text-xs font-medium">
-                        <AlertTriangle size={12} /> Out of Stock
-                      </span>
-                    ) : lowStock ? (
-                      <span className="flex items-center gap-1 text-amber-600 text-xs font-medium">
-                        <AlertTriangle size={12} /> Low Stock
-                      </span>
-                    ) : (
-                      <span className="text-green-600 text-xs font-medium">In Stock</span>
-                    )}
+                    <div className="flex flex-col gap-0.5">
+                      {outOfStock ? (
+                        <span className="flex items-center gap-1 text-red-600 text-xs font-medium">
+                          <AlertTriangle size={12} /> Out of Stock
+                        </span>
+                      ) : lowStock ? (
+                        <span className="flex items-center gap-1 text-amber-600 text-xs font-medium">
+                          <AlertTriangle size={12} /> Low Stock
+                        </span>
+                      ) : (
+                        <span className="text-green-600 text-xs font-medium">In Stock</span>
+                      )}
+                      {group.has_sizes && (group.sizes_out > 0 || group.sizes_low > 0) && (
+                        <span className="text-[10px] text-gray-400">
+                          {group.sizes_out > 0 && `${group.sizes_out} size${group.sizes_out > 1 ? 's' : ''} out`}
+                          {group.sizes_out > 0 && group.sizes_low > 0 && ', '}
+                          {group.sizes_low > 0 && `${group.sizes_low} low`}
+                        </span>
+                      )}
+                    </div>
                   </td>
+
+                  {/* Actions for selected size */}
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">
                       {isEditing ? (
@@ -219,11 +319,11 @@ export default function DMEInventory() {
                         </>
                       ) : (
                         <>
-                          <button onClick={() => setRestocking({ id: item.id, quantity: 1 })}
+                          <button onClick={() => setRestocking({ id: current.id, quantity: 1 })}
                             className="px-2 py-1 text-xs bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 flex items-center gap-1">
                             <Plus size={12} /> Restock
                           </button>
-                          <button onClick={() => setEditing({ id: item.id, quantity: item.quantity, reorder_point: item.reorder_point })}
+                          <button onClick={() => setEditing({ id: current.id, quantity: current.quantity, reorder_point: current.reorder_point })}
                             className="px-2 py-1 text-xs bg-gray-50 text-gray-600 rounded hover:bg-gray-100">
                             Edit
                           </button>
@@ -236,7 +336,7 @@ export default function DMEInventory() {
             })}
           </tbody>
         </table>
-        {filtered.length === 0 && (
+        {groups.length === 0 && (
           <div className="text-center py-8 text-gray-400">
             <Package size={24} className="mx-auto mb-2 opacity-50" />
             <p>No items match your filters</p>

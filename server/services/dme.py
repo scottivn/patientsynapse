@@ -962,6 +962,14 @@ class DMEService:
         order = await self.get_order(order_id)
         if not order:
             raise ValueError(f"Order {order_id} not found")
+
+        # Gate: check prior-auth status before allowing approval
+        from server.services.prior_auth import PriorAuthService
+        pa_svc = PriorAuthService(self._fhir_client)
+        fulfillment = await pa_svc.can_fulfill(order_id)
+        if not fulfillment["can_proceed"]:
+            raise ValueError(f"Cannot approve: {fulfillment['reason']}")
+
         order.status = DMEOrderStatus.APPROVED
         if notes:
             order.staff_notes = (order.staff_notes + "\n" + notes).strip()

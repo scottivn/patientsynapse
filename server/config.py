@@ -1,9 +1,39 @@
-"""PatientSynapse configuration via environment variables."""
+"""PatientSynapse configuration via environment variables.
 
+In production, secrets are loaded from AWS Secrets Manager and injected
+into the environment before Pydantic reads them. Non-secret config
+(APP_ENV, LLM_PROVIDER, etc.) still comes from the environment or .env.
+
+Precedence: env vars > Secrets Manager > .env file defaults.
+"""
+
+import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Literal
 from functools import lru_cache
+
+
+def _inject_secrets():
+    """Load secrets from AWS Secrets Manager and set them as env vars.
+
+    Only injects keys that are NOT already set in the environment,
+    so explicit env vars always win. This runs once before Settings
+    is instantiated.
+    """
+    from server.secrets import load_secrets
+    secrets = load_secrets()
+    injected = 0
+    for key, value in secrets.items():
+        upper_key = key.upper()
+        if upper_key not in os.environ:
+            os.environ[upper_key] = str(value)
+            injected += 1
+    if injected:
+        import logging
+        logging.getLogger(__name__).info(
+            f"Injected {injected} secrets from Secrets Manager into environment"
+        )
 
 
 class Settings(BaseSettings):
@@ -90,4 +120,6 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
+    # Inject secrets from AWS SM before Pydantic reads the env
+    _inject_secrets()
     return Settings()

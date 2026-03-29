@@ -234,6 +234,40 @@ async def init_all_tables():
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_product_size ON dme_inventory(product_id, size)"
         )
 
+        # ── Prior Auth Requests ──────────────────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS prior_auth_requests (
+                id TEXT PRIMARY KEY,
+                dme_order_id TEXT NOT NULL,
+                patient_id TEXT NOT NULL DEFAULT '',
+                patient_first_name TEXT NOT NULL DEFAULT '',
+                patient_last_name TEXT NOT NULL DEFAULT '',
+                payer_name TEXT NOT NULL DEFAULT '',
+                payer_member_id TEXT NOT NULL DEFAULT '',
+                insurance_type TEXT NOT NULL DEFAULT '',
+                auth_number TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                diagnosis_codes TEXT NOT NULL DEFAULT '[]',
+                hcpcs_codes TEXT NOT NULL DEFAULT '[]',
+                request_date TEXT,
+                submitted_date TEXT,
+                decision_date TEXT,
+                valid_from TEXT,
+                valid_until TEXT,
+                denial_reason TEXT NOT NULL DEFAULT '',
+                submission_notes TEXT NOT NULL DEFAULT '',
+                staff_notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prior_auth_order ON prior_auth_requests(dme_order_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prior_auth_status ON prior_auth_requests(status)"
+        )
+
         # ── Fax processing tracker ─────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS fax_processed (
