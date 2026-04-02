@@ -92,6 +92,27 @@ class ECWProvider(EMRProvider):
         ]
 
     @property
+    def system_scopes(self) -> list[str]:
+        """2-legged scopes for client_credentials (no user login).
+        Requires Backend - Single Patient API registration in eCW developer portal.
+        system/ scopes grant server-to-server access without provider login."""
+        return [
+            "system/Patient.read",
+            "system/Condition.read",
+            "system/Coverage.read",
+            "system/Encounter.read",
+            "system/DocumentReference.read",
+            "system/ServiceRequest.read",
+            "system/Practitioner.read",
+            "system/PractitionerRole.read",
+            "system/Location.read",
+            "system/Organization.read",
+            "system/Procedure.read",
+            "system/Provenance.read",
+            "system/Device.read",
+        ]
+
+    @property
     def notes(self) -> str:
         return (
             "Appointment booking requires healow Open Access API. "

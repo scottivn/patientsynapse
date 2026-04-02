@@ -176,25 +176,31 @@ class SMARTAuth:
 
     async def client_credentials_connect(self) -> TokenSet:
         """2-legged auth: obtain a token using client_credentials grant.
-        No user login required — uses system/ scopes."""
+        No user login required — uses system/ scopes.
+        Auth method adapts to the EMR: JWT assertion for asymmetric,
+        basic auth for client_secret."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         scopes = self.emr.system_scopes
         if not scopes:
             raise ValueError(f"{self.emr.name} does not define system_scopes for 2-legged auth.")
-        data = {
-            "grant_type": "client_credentials",
-            "scope": " ".join(scopes),
-        }
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"2-legged auth: token_url={self.emr.token_url} scopes={scopes}")
+
+        data = self._build_token_data(
+            grant_type="client_credentials",
+            scope=" ".join(scopes),
+        )
+        auth_header = self._build_auth_header()
+
+        logger.info(f"2-legged auth: token_url={self.emr.token_url} method={self.emr.auth_method.value}")
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 self.emr.token_url,
                 data=data,
-                auth=(self.emr.client_id, self.emr.client_secret),
+                auth=auth_header,
             )
             if not resp.is_success:
-                logger.error(f"2-legged auth failed: {resp.status_code} body={resp.text} scopes={scopes}")
+                logger.error(f"2-legged auth failed: {resp.status_code} body={resp.text}")
             resp.raise_for_status()
             body = resp.json()
             self._token = TokenSet(

@@ -60,12 +60,21 @@ async def lifespan(app: FastAPI):
     from server.db import init_all_tables
     await init_all_tables()
 
-    from server.services.allowable_rates import init_rates_table
+    from server.services.allowable_rates import init_rates_table, import_from_excel
     await init_rates_table()
 
     from server.services.dme_products import seed_products, seed_inventory
     await seed_products()
     await seed_inventory()
+
+    # Auto-import allowable rates from bundled Excel if table is empty
+    from server.services.allowable_rates import list_rates
+    existing_rates = await list_rates()
+    if not existing_rates:
+        excel_path = Path(__file__).parent.parent / "assets" / "InsuranceAllowablesForCPAP2026.xlsx"
+        if excel_path.exists():
+            result = await import_from_excel(str(excel_path))
+            logger.info(f"Auto-imported {result['total']} allowable rates from {len(result['payers'])} payers")
 
     # Initialize referral + fax ingestion services (work without OAuth for LLM-only features)
     auth = SMARTAuth(emr)

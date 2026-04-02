@@ -143,7 +143,7 @@ COMPLIANCE_REQUIRED_CATEGORIES = [
 ]
 
 # Common supply bundles that get ordered together
-VENDOR_OPTIONS = ["In-House", "PPM", "VGM"]
+VENDOR_OPTIONS = ["In-House", "PPM", "VGM", "Fisher & Paykel", "3B Medical", "ResMed", "Philips"]
 
 SUPPLY_BUNDLES = {
     "Full Resupply (Full Face)": [
@@ -1565,7 +1565,7 @@ class DMEService:
             "insurance_payer": "Blue Cross Blue Shield", "insurance_member_id": "BCB1234567",
             "insurance_group": "GRP100",
             "equipment_category": "CPAP Machine",
-            "equipment_description": "ResMed AirSense 11 Auto CPAP",
+            "equipment_description": "ResMed AirSense 11 AutoSet",
             "hcpcs_codes": ["E0601"],
             "diagnosis_code": "G47.33", "diagnosis_description": "Obstructive Sleep Apnea",
             "referring_physician": "Dr. Thomas Nguyen", "referring_npi": "1234567890",
@@ -1585,7 +1585,7 @@ class DMEService:
             "patient_state": "TX", "patient_zip": "78201",
             "insurance_payer": "Medicare", "insurance_member_id": "1EG4-TE5-MK72",
             "equipment_category": "BiPAP / ASV Machine",
-            "equipment_description": "ResMed AirCurve 10 VAuto BiPAP",
+            "equipment_description": "ResMed AirCurve 10 VAuto",
             "hcpcs_codes": ["E0470"],
             "diagnosis_code": "G47.33", "diagnosis_description": "Obstructive Sleep Apnea",
             "referring_physician": "Dr. Sarah Andry", "referring_npi": "1661906534",

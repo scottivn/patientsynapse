@@ -208,7 +208,8 @@ async def init_all_tables():
                 is_machine INTEGER NOT NULL DEFAULT 0,
                 is_accessory INTEGER NOT NULL DEFAULT 0,
                 active INTEGER NOT NULL DEFAULT 1,
-                sort_order INTEGER NOT NULL DEFAULT 100
+                sort_order INTEGER NOT NULL DEFAULT 100,
+                manufacturer_sku TEXT NOT NULL DEFAULT ''
             )
         """)
         await db.execute(
@@ -217,6 +218,11 @@ async def init_all_tables():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_product_category ON dme_products(category)"
         )
+        # Add manufacturer_sku column if missing (migration for existing DBs)
+        try:
+            await db.execute("ALTER TABLE dme_products ADD COLUMN manufacturer_sku TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass  # Column already exists
 
         # ── In-House Inventory ────────────────────────────────
         await db.execute("""

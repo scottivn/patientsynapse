@@ -244,7 +244,11 @@ async def test_vendor_options_constant():
     assert "In-House" in VENDOR_OPTIONS
     assert "PPM" in VENDOR_OPTIONS
     assert "VGM" in VENDOR_OPTIONS
-    assert len(VENDOR_OPTIONS) == 3
+    assert "Fisher & Paykel" in VENDOR_OPTIONS
+    assert "3B Medical" in VENDOR_OPTIONS
+    assert "ResMed" in VENDOR_OPTIONS
+    assert "Philips" in VENDOR_OPTIONS
+    assert len(VENDOR_OPTIONS) == 7
 
 
 # ──────────────────────────────────────────────
