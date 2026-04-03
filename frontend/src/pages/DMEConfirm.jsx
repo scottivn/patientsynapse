@@ -300,6 +300,16 @@ export default function DMEConfirm() {
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6">
             <p className="text-sm font-medium text-blue-900">{order.equipment_description}</p>
             <p className="text-xs text-blue-700 mt-1">{order.equipment_category}</p>
+            {order.estimated_patient_cost != null && (
+              <div className="mt-2 bg-white/60 rounded-md px-3 py-2 border border-blue-200">
+                <p className="text-sm font-semibold text-gray-900">
+                  Your estimated cost: <span className="text-blue-700">${order.estimated_patient_cost.toFixed(2)}</span>
+                </p>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Based on your insurance benefits. Actual cost may vary after final processing.
+                </p>
+              </div>
+            )}
             {/* Auto-refill opt-in/out */}
             <div className="mt-3 border-t border-blue-200 pt-3">
               <div className="flex items-center justify-between">
@@ -533,11 +543,24 @@ export default function DMEConfirm() {
             </button>
             {showRejectForm && (
               <div className="mt-3 space-y-3 bg-red-50 border border-red-100 rounded-lg p-4">
+                <div className="flex flex-wrap gap-1.5 mb-1">
+                  {['Too expensive', 'Wrong supplies', 'Incorrect info', 'No longer needed'].map(preset => (
+                    <button key={preset} type="button"
+                      onClick={() => setRejectReason(preset)}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        rejectReason === preset
+                          ? 'bg-red-600 text-white border-red-600'
+                          : 'bg-white text-red-700 border-red-200 hover:bg-red-100'
+                      }`}>
+                      {preset}
+                    </button>
+                  ))}
+                </div>
                 <textarea
                   value={rejectReason}
                   onChange={e => setRejectReason(e.target.value)}
                   rows={2}
-                  placeholder="Tell us what's wrong (wrong supplies, incorrect info, etc.)"
+                  placeholder="Tell us more (optional)"
                   className="w-full border border-red-200 rounded-md px-3 py-2 text-sm resize-none focus:ring-red-500 focus:border-red-500"
                 />
                 <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">

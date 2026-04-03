@@ -5,10 +5,10 @@ from typing import Optional
 
 
 class ECWProvider(EMRProvider):
-    """eClinicalWorks FHIR R4 via SMART on FHIR standalone launch.
+    """eClinicalWorks FHIR R4 via SMART Backend - Single Patient API.
 
-    Auth: asymmetric JWT (private_key_jwt) with RS384.
-    Scopes: user-level read/write.
+    Auth: asymmetric JWT (private_key_jwt) with RS384, 2-legged client_credentials.
+    Scopes: system-level read (no user login required).
     """
 
     def __init__(self, settings):

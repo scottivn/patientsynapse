@@ -400,20 +400,47 @@ async def auth_callback(
 @router.post("/auth/connect-service", tags=["SMART on FHIR"], dependencies=[Depends(require_admin)])
 async def auth_connect_service():
     """2-legged auth: client_credentials grant (no user login).
-    Use for sandbox testing or backend automation."""
+    Use for sandbox testing or backend automation.
+    After successful connect, auto-pulls patients from EMR to populate the DME board."""
     auth = get_smart_auth()
     try:
         token = await auth.client_credentials_connect()
-        return {
-            "status": "authenticated",
-            "emr": get_emr().name,
-            "scope": token.scope,
-            "expires_in": token.expires_in,
-            "flow": "client_credentials",
-        }
     except Exception as e:
         logger.error(f"Service connect failed: {e}")
         raise HTTPException(400, "Service connect failed. Check server logs.")
+
+    # Switch from stub to live FHIR client now that we have a token
+    from server.fhir.client import FHIRClient
+    live_client = FHIRClient(auth)
+    _dme_service.set_fhir_client(live_client)
+
+    # Auto-pull patients from EMR to populate DME board
+    pull_result = {"pulled": 0, "skipped": 0, "errors": 0}
+    try:
+        pull_result = await _dme_service.pull_emr_patients()
+    except Exception as e:
+        logger.warning(f"EMR patient pull failed (non-fatal): {e}")
+
+    return {
+        "status": "authenticated",
+        "emr": get_emr().name,
+        "scope": token.scope,
+        "expires_in": token.expires_in,
+        "flow": "client_credentials",
+        "patients_pulled": pull_result,
+    }
+
+
+@router.post("/dme/pull-emr-patients", tags=["DME Orders"], dependencies=[Depends(require_admin)])
+async def pull_emr_patients():
+    """Manually pull patients from the connected EMR to populate the DME board.
+    Skips patients that already have local orders."""
+    try:
+        result = await _dme_service.pull_emr_patients()
+        return result
+    except Exception as e:
+        logger.error(f"EMR patient pull failed: {e}")
+        raise HTTPException(500, f"EMR patient pull failed: {e}")
 
 
 # ---- Referral routes (admin + front_office) ----

@@ -90,6 +90,8 @@ async def init_all_tables():
                 documents TEXT NOT NULL DEFAULT '[]',
                 hcpcs_codes TEXT NOT NULL DEFAULT '[]',
                 expected_reimbursement REAL,
+                estimated_patient_cost REAL,
+                estimated_insurance_pays REAL,
                 supply_months INTEGER NOT NULL DEFAULT 6,
                 pricing_details TEXT NOT NULL DEFAULT '[]',
                 confirmation_token TEXT,

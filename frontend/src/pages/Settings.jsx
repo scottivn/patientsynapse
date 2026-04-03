@@ -4,7 +4,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import { getAuthStatus, getStatus, loginAuth, switchEMR, switchLLM, connectService } from '../services/api'
 
 const EMR_OPTIONS = [
-  { value: 'ecw', label: 'eClinicalWorks', desc: 'SMART on FHIR, asymmetric JWT auth' },
+  { value: 'ecw', label: 'eClinicalWorks', desc: 'Backend API, 2-legged JWT auth' },
   { value: 'athena', label: 'athenahealth', desc: 'SMART on FHIR, client secret auth' },
 ]
 
@@ -163,14 +163,26 @@ export default function Settings() {
               <span className="text-sm font-medium">Not connected</span>
             </div>
           )}
-          <button onClick={handleLogin} className="btn-primary text-sm flex items-center gap-2">
-            <ExternalLink size={14} />
-            {connected ? 'Reconnect' : `Connect to ${emrName}`}
-          </button>
-          {status?.emr_provider_key === 'athena' && (
-            <button onClick={handleServiceConnect} disabled={connecting} className="btn-primary text-sm flex items-center gap-2 bg-amber-600 hover:bg-amber-700">
+          {status?.emr_provider_key === 'ecw' ? (
+            <button onClick={handleServiceConnect} disabled={connecting} className="btn-primary text-sm flex items-center gap-2">
               <Zap size={14} />
-              {connecting ? 'Connecting...' : 'Service Connect (2-legged)'}
+              {connecting ? 'Connecting...' : connected ? 'Reconnect' : 'Connect to eCW'}
+            </button>
+          ) : status?.emr_provider_key === 'athena' ? (
+            <>
+              <button onClick={handleLogin} className="btn-primary text-sm flex items-center gap-2">
+                <ExternalLink size={14} />
+                {connected ? 'Reconnect' : `Connect to ${emrName}`}
+              </button>
+              <button onClick={handleServiceConnect} disabled={connecting} className="btn-primary text-sm flex items-center gap-2 bg-amber-600 hover:bg-amber-700">
+                <Zap size={14} />
+                {connecting ? 'Connecting...' : 'Service Connect (2-legged)'}
+              </button>
+            </>
+          ) : (
+            <button onClick={handleLogin} className="btn-primary text-sm flex items-center gap-2">
+              <ExternalLink size={14} />
+              {connected ? 'Reconnect' : `Connect to ${emrName}`}
             </button>
           )}
         </div>

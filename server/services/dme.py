@@ -280,6 +280,8 @@ class DMEOrder:
     # Pricing (from allowable rates)
     hcpcs_codes: List[str] = field(default_factory=list)
     expected_reimbursement: Optional[float] = None
+    estimated_patient_cost: Optional[float] = None       # copay / coinsurance the patient owes
+    estimated_insurance_pays: Optional[float] = None     # what insurance covers
     supply_months: int = 6
     pricing_details: List[dict] = field(default_factory=list)
 
@@ -479,6 +481,8 @@ def _row_to_order(row: dict) -> DMEOrder:
         documents=docs,
         hcpcs_codes=hcpcs,
         expected_reimbursement=row.get("expected_reimbursement"),
+        estimated_patient_cost=row.get("estimated_patient_cost"),
+        estimated_insurance_pays=row.get("estimated_insurance_pays"),
         supply_months=row.get("supply_months", 6),
         pricing_details=pricing,
         confirmation_token=row.get("confirmation_token"),
@@ -538,8 +542,9 @@ async def _save_order(order: DMEOrder) -> None:
                auto_replace, auto_replace_frequency, next_replace_date,
                compliance_status, compliance_avg_hours, compliance_days_met,
                compliance_total_days, compliance_last_checked,
-               documents, hcpcs_codes, expected_reimbursement, supply_months,
-               pricing_details,
+               documents, hcpcs_codes, expected_reimbursement,
+               estimated_patient_cost, estimated_insurance_pays,
+               supply_months, pricing_details,
                confirmation_token, confirmation_token_expires, confirmation_sent_at,
                confirmation_sent_via, confirmation_responded_at,
                patient_confirmed_address, patient_notes,
@@ -552,10 +557,10 @@ async def _save_order(order: DMEOrder) -> None:
                insurance_verified, insurance_notes, rejection_reason,
                created_at, updated_at
            ) VALUES (
-               ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?, ?,?,
-               ?,?,?,?,?, ?,?,?,?, ?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,
-               ?,?,?,?,?, ?,?, ?,?,?, ?,?,?,?,?,?,?, ?,?,?, ?,
-               ?,?,?, ?,?,?, ?,?
+               ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+               ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+               ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+               ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
            )
            ON CONFLICT(id) DO UPDATE SET
                status=excluded.status,
@@ -599,6 +604,8 @@ async def _save_order(order: DMEOrder) -> None:
                documents=excluded.documents,
                hcpcs_codes=excluded.hcpcs_codes,
                expected_reimbursement=excluded.expected_reimbursement,
+               estimated_patient_cost=excluded.estimated_patient_cost,
+               estimated_insurance_pays=excluded.estimated_insurance_pays,
                supply_months=excluded.supply_months,
                pricing_details=excluded.pricing_details,
                confirmation_token=excluded.confirmation_token,
@@ -644,8 +651,9 @@ async def _save_order(order: DMEOrder) -> None:
          int(order.auto_replace), order.auto_replace_frequency, order.next_replace_date,
          order.compliance_status, order.compliance_avg_hours, order.compliance_days_met,
          order.compliance_total_days, order.compliance_last_checked,
-         docs_json, hcpcs_json, order.expected_reimbursement, order.supply_months,
-         pricing_json,
+         docs_json, hcpcs_json, order.expected_reimbursement,
+         order.estimated_patient_cost, order.estimated_insurance_pays,
+         order.supply_months, pricing_json,
          order.confirmation_token, order.confirmation_token_expires,
          order.confirmation_sent_at, order.confirmation_sent_via,
          order.confirmation_responded_at,
@@ -804,15 +812,31 @@ class DMEService:
         """Extract insurance info from the first active FHIR Coverage."""
         for cov in coverages:
             if cov.status == "active":
-                payer = cov.payor[0].display if cov.payor else ""
+                payer = ""
+                if cov.payor:
+                    # Prefer display name; fall back to type.text (athena puts plan
+                    # type there e.g. "Medicare supplemental policy...")
+                    payer = cov.payor[0].display or ""
+                if not payer:
+                    raw = cov.model_dump(by_alias=True)
+                    # Athena: type.text has the insurance type description
+                    payer = raw.get("type", {}).get("text", "")
+                    # Clean up verbose descriptions
+                    if payer and len(payer) > 40:
+                        payer = payer.split("(")[0].strip()
                 member_id = ""
                 group = ""
-                # subscriberId may be a direct field or in class_
                 raw = cov.model_dump(by_alias=True)
                 member_id = raw.get("subscriberId", "")
                 grouping = raw.get("grouping", {})
                 if grouping:
                     group = grouping.get("group", "")
+                # Also check identifier for member number
+                if not member_id:
+                    for ident in raw.get("identifier", []):
+                        if ident.get("type", {}).get("coding", [{}])[0].get("code") == "MB":
+                            member_id = ident.get("value", "")
+                            break
                 return {
                     "payer": payer,
                     "member_id": member_id,
@@ -838,6 +862,208 @@ class DMEService:
             "status": device.status or "",
             "notes": notes,
         }
+
+    # Synthetic insurance pool for sandbox patients without Coverage data.
+    # Rotates through realistic payers so the board has variety for testing.
+    _SANDBOX_PAYERS = [
+        {"payer": "Blue Cross Blue Shield", "prefix": "BCB"},
+        {"payer": "UnitedHealthcare", "prefix": "UHC"},
+        {"payer": "Aetna", "prefix": "AET"},
+        {"payer": "Cigna", "prefix": "CIG"},
+        {"payer": "Humana", "prefix": "HUM"},
+        {"payer": "Medicare", "prefix": "1EG4"},
+        {"payer": "Molina Healthcare", "prefix": "MOL"},
+        {"payer": "Anthem", "prefix": "ANT"},
+    ]
+
+    @classmethod
+    def _synthetic_insurance(cls, index: int) -> dict:
+        """Generate deterministic synthetic insurance for sandbox testing."""
+        entry = cls._SANDBOX_PAYERS[index % len(cls._SANDBOX_PAYERS)]
+        member_num = f"{entry['prefix']}{1000000 + index * 7:07d}"
+        return {
+            "payer": entry["payer"],
+            "member_id": member_num,
+            "group": f"GRP{50000 + index * 3:05d}",
+        }
+
+    # ── EMR patient pull (auto-populate board from FHIR) ─────────
+
+    async def pull_emr_patients(self) -> dict:
+        """Fetch patients from the connected EMR and create DME orders for them.
+
+        Called automatically after a successful 2-legged connect. Pulls patients,
+        their Coverage (insurance), Conditions (diagnoses), and Devices.
+        Skips patients that already have local orders.
+        Returns summary: {pulled: int, skipped: int, errors: int}.
+        """
+        if not self._fhir_client:
+            return {"pulled": 0, "skipped": 0, "errors": 0, "message": "No FHIR client"}
+
+        from server.fhir.resources import (
+            PatientResource, CoverageResource, ConditionResource, DeviceResource,
+        )
+        patient_res = PatientResource(self._fhir_client)
+        coverage_res = CoverageResource(self._fhir_client)
+        condition_res = ConditionResource(self._fhir_client)
+        device_res = DeviceResource(self._fhir_client)
+
+        # Search for patients — some EMRs (athena) require specific search params,
+        # so we search by common last names to discover sandbox patients.
+        # A bare _count search works for eCW/stub but not athena.
+        entries = []
+        seen_ids: set = set()
+        bundle = await self._fhir_client.search("Patient", {"_count": "50"})
+        if bundle.get("entry"):
+            # Bare search worked (eCW, stub)
+            entries = bundle["entry"]
+        else:
+            # Athena: requires name/family/identifier — sweep common names
+            _COMMON_NAMES = [
+                "Smith", "Jones", "Williams", "Brown", "Johnson", "Davis",
+                "Miller", "Wilson", "Moore", "Taylor", "Garcia", "Martinez",
+                "Rodriguez", "Hernandez", "Lopez", "Anderson", "Thomas",
+            ]
+            for name in _COMMON_NAMES:
+                b = await self._fhir_client.search("Patient", {"name": name, "_count": "10"})
+                for e in b.get("entry", []):
+                    pid = e.get("resource", {}).get("id")
+                    if pid and pid not in seen_ids:
+                        seen_ids.add(pid)
+                        entries.append(e)
+                # Cap at 30 patients for demo board
+                if len(entries) >= 30:
+                    break
+        logger.info(f"EMR pull: found {len(entries)} patients")
+
+        pulled = 0
+        skipped = 0
+        errors = 0
+
+        for entry in entries:
+            resource = entry.get("resource", {})
+            if resource.get("resourceType") != "Patient":
+                continue
+            try:
+                from server.fhir.models import Patient as FHIRPatient
+                patient = FHIRPatient(**resource)
+                pdata = self._patient_to_dict(patient)
+
+                # Skip if we already have orders for this patient
+                if pdata["patient_id"]:
+                    existing = await db_fetch_one(
+                        "SELECT id FROM dme_orders WHERE patient_id = ? LIMIT 1",
+                        (pdata["patient_id"],),
+                    )
+                    if existing:
+                        skipped += 1
+                        continue
+
+                # Pull insurance
+                insurance = {}
+                if patient.id:
+                    try:
+                        coverages = await coverage_res.search_by_patient(patient.id)
+                        insurance = self._coverage_to_dict(coverages)
+                    except Exception as e:
+                        logger.debug(f"Coverage pull failed for {patient.id}: {e}")
+
+                # Sandbox patients often lack Coverage data — assign
+                # synthetic insurance so the pricing/eligibility workflow
+                # can be tested end-to-end.
+                if not insurance.get("payer"):
+                    insurance = self._synthetic_insurance(pulled)
+
+                # Pull conditions — look for sleep apnea (G47.33)
+                diagnosis_code = ""
+                diagnosis_desc = ""
+                if patient.id:
+                    try:
+                        conditions = await condition_res.search_by_patient(patient.id)
+                        for cond in conditions:
+                            if cond.code and cond.code.coding:
+                                for coding in cond.code.coding:
+                                    code = coding.code or ""
+                                    if code.startswith("G47"):
+                                        diagnosis_code = code
+                                        diagnosis_desc = coding.display or cond.code.text or ""
+                                        break
+                                if diagnosis_code:
+                                    break
+                        # If no sleep apnea found, use first condition
+                        if not diagnosis_code and conditions:
+                            cond = conditions[0]
+                            if cond.code and cond.code.coding:
+                                diagnosis_code = cond.code.coding[0].code or ""
+                                diagnosis_desc = cond.code.coding[0].display or cond.code.text or ""
+                    except Exception as e:
+                        logger.debug(f"Condition pull failed for {patient.id}: {e}")
+
+                # Pull devices — check if patient has a CPAP/BiPAP
+                equipment_cat = "CPAP Supplies"
+                equipment_desc = "CPAP Supply Bundle"
+                hcpcs = ["A7030", "A7031", "A7035", "A4604"]
+                if patient.id:
+                    try:
+                        devices = await device_res.search_by_patient(patient.id)
+                        for dev in devices:
+                            dtype = ""
+                            if dev.type and dev.type.text:
+                                dtype = dev.type.text.lower()
+                            elif dev.type and dev.type.coding:
+                                dtype = (dev.type.coding[0].display or "").lower()
+                            mfg = (dev.manufacturer or "").lower()
+                            model = (dev.modelNumber or "")
+
+                            if "bipap" in dtype or "asv" in dtype or "bilevel" in dtype:
+                                equipment_cat = "BiPAP / ASV Machine"
+                                equipment_desc = f"{dev.manufacturer or 'BiPAP'} {model} + Supplies".strip()
+                                hcpcs = ["E0470", "A7030", "A7038", "A7039", "A7046"]
+                                break
+                            elif "cpap" in dtype or "airsense" in mfg or "resmed" in mfg or "dreamstation" in mfg:
+                                equipment_cat = "CPAP Machine"
+                                equipment_desc = f"{dev.manufacturer or 'CPAP'} {model} + Supplies".strip()
+                                hcpcs = ["E0601", "A7030", "A7031", "A7035", "A4604"]
+                                break
+                    except Exception as e:
+                        logger.debug(f"Device pull failed for {patient.id}: {e}")
+
+                # Create the order
+                order_data = {
+                    "patient_first_name": pdata["first_name"],
+                    "patient_last_name": pdata["last_name"],
+                    "patient_dob": pdata["dob"],
+                    "patient_phone": pdata["phone"],
+                    "patient_email": pdata["email"],
+                    "patient_address": pdata["address"],
+                    "patient_city": pdata["city"],
+                    "patient_state": pdata["state"],
+                    "patient_zip": pdata["zip"],
+                    "patient_id": pdata["patient_id"],
+                    "insurance_payer": insurance.get("payer", ""),
+                    "insurance_member_id": insurance.get("member_id", ""),
+                    "insurance_group": insurance.get("group", ""),
+                    "equipment_category": equipment_cat,
+                    "equipment_description": equipment_desc,
+                    "hcpcs_codes": hcpcs,
+                    "diagnosis_code": diagnosis_code,
+                    "diagnosis_description": diagnosis_desc,
+                    "origin": OrderOrigin.PRESCRIPTION,
+                }
+                await self.create_order(order_data)
+                pulled += 1
+                logger.info(
+                    f"EMR pull: created order for {pdata['first_name']} {pdata['last_name']} "
+                    f"({insurance.get('payer', 'no insurance')})"
+                )
+
+            except Exception as e:
+                errors += 1
+                logger.warning(f"EMR pull: failed for patient entry: {e}")
+
+        result = {"pulled": pulled, "skipped": skipped, "errors": errors}
+        logger.info(f"EMR pull complete: {result}")
+        return result
 
     # ── Order creation ──────────────────────────────────────────
 
@@ -935,18 +1161,32 @@ class DMEService:
             order.status = DMEOrderStatus.PENDING
 
         # Look up allowable rates for pricing if payer and HCPCS codes are known
+        # Normalize common payer name variants to match allowable rates table
+        _PAYER_ALIASES = {
+            "blue cross blue shield": "BCBS", "blue cross": "BCBS",
+            "united healthcare": "UHC", "united health care": "UHC",
+        }
         if order.insurance_payer and order.hcpcs_codes:
             try:
                 from server.services.allowable_rates import get_bundle_pricing
+                rate_payer = _PAYER_ALIASES.get(order.insurance_payer.lower(), order.insurance_payer)
                 pricing = await get_bundle_pricing(
-                    payer=order.insurance_payer,
+                    payer=rate_payer,
                     hcpcs_codes=order.hcpcs_codes,
                     supply_months=order.supply_months or 6,
                 )
                 order.expected_reimbursement = pricing["total"]
                 order.pricing_details = pricing["items"]
+                # Estimate patient cost (copay/coinsurance) vs insurance portion
+                # Default 20% coinsurance — real E&B data would replace this
+                coinsurance_rate = 0.20
+                order.estimated_insurance_pays = round(pricing["total"] * (1 - coinsurance_rate), 2)
+                order.estimated_patient_cost = round(pricing["total"] * coinsurance_rate, 2)
                 if pricing["complete"]:
-                    order.insurance_notes += f" | Expected reimbursement: ${pricing['total']:.2f}"
+                    order.insurance_notes += (
+                        f" | Expected reimbursement: ${pricing['total']:.2f}"
+                        f" (est. patient cost: ${order.estimated_patient_cost:.2f})"
+                    )
                 else:
                     missing = [i["hcpcs_code"] for i in pricing["items"] if not i["found"]]
                     order.insurance_notes += f" | Partial pricing (missing rates for: {', '.join(missing)})"
@@ -1119,6 +1359,7 @@ class DMEService:
             "pickup_ready_date": order.pickup_ready_date,
             "bundle_items": order.bundle_items,
             "selected_items": order.selected_items,
+            "estimated_patient_cost": order.estimated_patient_cost,
             "auto_replace": order.auto_replace,
             "auto_replace_frequency": order.auto_replace_frequency,
             "next_replace_date": order.next_replace_date,
@@ -1565,8 +1806,8 @@ class DMEService:
             "insurance_payer": "Blue Cross Blue Shield", "insurance_member_id": "BCB1234567",
             "insurance_group": "GRP100",
             "equipment_category": "CPAP Machine",
-            "equipment_description": "ResMed AirSense 11 AutoSet",
-            "hcpcs_codes": ["E0601"],
+            "equipment_description": "ResMed AirSense 11 AutoSet + Supplies",
+            "hcpcs_codes": ["E0601", "A7030", "A7031", "A7035", "A4604"],
             "diagnosis_code": "G47.33", "diagnosis_description": "Obstructive Sleep Apnea",
             "referring_physician": "Dr. Thomas Nguyen", "referring_npi": "1234567890",
             "clinical_notes": "AHI 32, requires CPAP at 12 cmH2O",
@@ -1585,8 +1826,8 @@ class DMEService:
             "patient_state": "TX", "patient_zip": "78201",
             "insurance_payer": "Medicare", "insurance_member_id": "1EG4-TE5-MK72",
             "equipment_category": "BiPAP / ASV Machine",
-            "equipment_description": "ResMed AirCurve 10 VAuto",
-            "hcpcs_codes": ["E0470"],
+            "equipment_description": "ResMed AirCurve 10 VAuto + Supplies",
+            "hcpcs_codes": ["E0470", "A7030", "A7038", "A7039", "A7046"],
             "diagnosis_code": "G47.33", "diagnosis_description": "Obstructive Sleep Apnea",
             "referring_physician": "Dr. Sarah Andry", "referring_npi": "1661906534",
             "origin": OrderOrigin.PRESCRIPTION,

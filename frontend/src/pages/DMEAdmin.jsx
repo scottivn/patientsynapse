@@ -575,7 +575,13 @@ function OrderRow({ order, onAction }) {
               <DetailItem label="Referring Physician" value={order.referring_physician || '—'} />
               <DetailItem label="HCPCS Codes" value={order.hcpcs_codes?.join(', ') || '—'} />
               {order.expected_reimbursement != null && (
-                <DetailItem label="Expected Reimbursement" value={`$${order.expected_reimbursement.toFixed(2)}`} />
+                <DetailItem label="Total Allowable" value={`$${order.expected_reimbursement.toFixed(2)}`} />
+              )}
+              {order.estimated_insurance_pays != null && (
+                <DetailItem label="Insurance Pays" value={`$${order.estimated_insurance_pays.toFixed(2)}`} />
+              )}
+              {order.estimated_patient_cost != null && (
+                <DetailItem label="Patient Cost (est.)" value={`$${order.estimated_patient_cost.toFixed(2)}`} />
               )}
               {order.fulfillment_method !== 'not_selected' && (
                 <DetailItem label="Fulfillment" value={order.fulfillment_method === 'ship' ? 'Ship to patient' : 'Office pickup'} />
@@ -1614,9 +1620,17 @@ function KanbanCard({ order, onAction, onSelect }) {
       </div>
 
       {/* Equipment */}
-      <p className="text-xs text-gray-600 truncate mb-2">
+      <p className="text-xs text-gray-600 truncate mb-1">
         {order.equipment_description || order.equipment_category || 'DME Order'}
       </p>
+      {order.estimated_patient_cost != null && (
+        <p className="text-[10px] text-gray-500 mb-1.5">
+          Patient: <span className="font-semibold text-gray-700">${order.estimated_patient_cost.toFixed(2)}</span>
+          {order.estimated_insurance_pays != null && (
+            <span> · Ins: ${order.estimated_insurance_pays.toFixed(2)}</span>
+          )}
+        </p>
+      )}
 
       {/* Badges row */}
       <div className="flex items-center gap-1 flex-wrap mb-2">
@@ -1791,7 +1805,13 @@ function OrderDetailModal({ order, onAction, onClose }) {
               <DetailItem label="Referring Physician" value={order.referring_physician || '—'} />
               <DetailItem label="HCPCS Codes" value={order.hcpcs_codes?.join(', ') || '—'} />
               {order.expected_reimbursement != null && (
-                <DetailItem label="Expected Reimbursement" value={`$${order.expected_reimbursement.toFixed(2)}`} />
+                <DetailItem label="Total Allowable" value={`$${order.expected_reimbursement.toFixed(2)}`} />
+              )}
+              {order.estimated_insurance_pays != null && (
+                <DetailItem label="Insurance Pays" value={`$${order.estimated_insurance_pays.toFixed(2)}`} />
+              )}
+              {order.estimated_patient_cost != null && (
+                <DetailItem label="Patient Cost (est.)" value={`$${order.estimated_patient_cost.toFixed(2)}`} />
               )}
               {order.fulfillment_method !== 'not_selected' && (
                 <DetailItem label="Fulfillment" value={order.fulfillment_method === 'ship' ? 'Ship to patient' : 'Office pickup'} />
