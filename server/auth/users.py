@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _DB_PATH: str = ""
 
 # Valid roles — used for validation on create/update
-VALID_ROLES = ("admin", "front_office", "dme")
+VALID_ROLES = ("admin", "front_office", "dme", "demo")
 
 
 def _get_db_path() -> str:
@@ -85,15 +85,35 @@ async def seed_default_admin(username: str, password: str):
         (count,) = await cursor.fetchone()
         if count > 0:
             logger.info("Admin user(s) already exist, skipping seed")
-            return
+        else:
+            hashed = hash_password(password)
+            await db.execute(
+                "INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)",
+                (username, hashed, "admin"),
+            )
+            await db.commit()
+            logger.info(f"Default admin user '{username}' created")
 
-        hashed = hash_password(password)
+    # Always ensure the demo user exists
+    await _seed_demo_user()
+
+
+async def _seed_demo_user():
+    """Ensure a read-only demo user exists for recruiter/portfolio access."""
+    db_path = _get_db_path()
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute(
+            "SELECT id FROM admin_users WHERE username = 'demo'"
+        )
+        if await cursor.fetchone():
+            return
+        hashed = hash_password("demo")
         await db.execute(
             "INSERT INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)",
-            (username, hashed, "admin"),
+            ("demo", hashed, "demo"),
         )
         await db.commit()
-        logger.info(f"Default admin user '{username}' created")
+        logger.info("Demo user created (username: demo, password: demo)")
 
 
 async def get_user_by_id(user_id: int) -> dict | None:

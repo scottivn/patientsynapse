@@ -5,6 +5,7 @@ const ROLE_LANDING = {
   admin: '/',
   front_office: '/faxes',
   dme: '/dme/admin',
+  demo: '/',
 }
 
 /**

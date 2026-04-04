@@ -13,23 +13,24 @@ import {
   LogOut,
   User,
   Users,
+  Eye,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 // Each nav item includes `roles` — which roles can see it.
 // If omitted, all authenticated users can see it.
 const NAV_MAIN = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin'] },
-  { to: '/faxes', icon: Inbox, label: 'Fax Inbox', roles: ['admin', 'front_office'] },
-  { to: '/referrals', icon: FileText, label: 'Referrals', roles: ['admin', 'front_office'] },
-  { to: '/referral-auths', icon: ClipboardCheck, label: 'Referral Auths', roles: ['admin', 'front_office'] },
-  { to: '/scheduling', icon: CalendarClock, label: 'Scheduling', roles: ['admin', 'front_office'] },
-  { to: '/rcm', icon: DollarSign, label: 'RCM', roles: ['admin'] },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'demo'] },
+  { to: '/faxes', icon: Inbox, label: 'Fax Inbox', roles: ['admin', 'front_office', 'demo'] },
+  { to: '/referrals', icon: FileText, label: 'Referrals', roles: ['admin', 'front_office', 'demo'] },
+  { to: '/referral-auths', icon: ClipboardCheck, label: 'Referral Auths', roles: ['admin', 'front_office', 'demo'] },
+  { to: '/scheduling', icon: CalendarClock, label: 'Scheduling', roles: ['admin', 'front_office', 'demo'] },
+  { to: '/rcm', icon: DollarSign, label: 'RCM', roles: ['admin', 'demo'] },
 ]
 
 const NAV_DME = [
-  { to: '/dme/admin', icon: ShieldCheck, label: 'DME Admin', roles: ['admin', 'dme'] },
-  { to: '/allowable-rates', icon: DollarSign, label: 'Allowable Rates', roles: ['admin', 'dme'] },
+  { to: '/dme/admin', icon: ShieldCheck, label: 'DME Admin', roles: ['admin', 'dme', 'demo'] },
+  { to: '/allowable-rates', icon: DollarSign, label: 'Allowable Rates', roles: ['admin', 'dme', 'demo'] },
 ]
 
 const NAV_SYSTEM = [
@@ -41,6 +42,7 @@ const ROLE_LABELS = {
   admin: 'Admin',
   front_office: 'Front Office',
   dme: 'DME',
+  demo: 'Demo',
 }
 
 function NavSection({ items, userRole }) {
@@ -66,7 +68,7 @@ function NavSection({ items, userRole }) {
 }
 
 export default function Layout() {
-  const { user, logout } = useAuth()
+  const { user, logout, isDemo } = useAuth()
   const navigate = useNavigate()
   const userRole = user?.role || 'admin'
 
@@ -171,6 +173,12 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
+        {isDemo && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-sm text-amber-800">
+            <Eye size={14} className="text-amber-600 flex-shrink-0" />
+            <span><strong>Demo Mode</strong> — You're viewing with sample data. All actions are read-only.</span>
+          </div>
+        )}
         <div className="max-w-7xl mx-auto px-6 py-6">
           <Outlet />
         </div>

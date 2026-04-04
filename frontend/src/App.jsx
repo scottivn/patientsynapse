@@ -21,12 +21,13 @@ const ROLE_LANDING = {
   admin: '/',
   front_office: '/faxes',
   dme: '/dme/admin',
+  demo: '/',
 }
 
 function RoleLanding() {
   const { user } = useAuth()
   const role = user?.role || 'admin'
-  if (role === 'admin') return <Dashboard />
+  if (role === 'admin' || role === 'demo') return <Dashboard />
   return <Navigate to={ROLE_LANDING[role] || '/'} replace />
 }
 
@@ -44,20 +45,21 @@ export default function App() {
           {/* Landing — role-based redirect */}
           <Route path="/" element={<RoleLanding />} />
 
-          {/* Admin-only routes */}
-          <Route path="/faxes" element={<ProtectedRoute allowedRoles={['admin', 'front_office']}><FaxInbox /></ProtectedRoute>} />
-          <Route path="/faxes/:id" element={<ProtectedRoute allowedRoles={['admin', 'front_office']}><ReferralDetail /></ProtectedRoute>} />
-          <Route path="/referrals" element={<ProtectedRoute allowedRoles={['admin', 'front_office']}><Referrals /></ProtectedRoute>} />
-          <Route path="/referrals/:id" element={<ProtectedRoute allowedRoles={['admin', 'front_office']}><ReferralDetail /></ProtectedRoute>} />
-          <Route path="/referral-auths" element={<ProtectedRoute allowedRoles={['admin', 'front_office']}><ReferralAuths /></ProtectedRoute>} />
-          <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['admin', 'front_office']}><Scheduling /></ProtectedRoute>} />
-          <Route path="/rcm" element={<ProtectedRoute allowedRoles={['admin']}><RCM /></ProtectedRoute>} />
+          {/* Practice routes */}
+          <Route path="/faxes" element={<ProtectedRoute allowedRoles={['admin', 'front_office', 'demo']}><FaxInbox /></ProtectedRoute>} />
+          <Route path="/faxes/:id" element={<ProtectedRoute allowedRoles={['admin', 'front_office', 'demo']}><ReferralDetail /></ProtectedRoute>} />
+          <Route path="/referrals" element={<ProtectedRoute allowedRoles={['admin', 'front_office', 'demo']}><Referrals /></ProtectedRoute>} />
+          <Route path="/referrals/:id" element={<ProtectedRoute allowedRoles={['admin', 'front_office', 'demo']}><ReferralDetail /></ProtectedRoute>} />
+          <Route path="/referral-auths" element={<ProtectedRoute allowedRoles={['admin', 'front_office', 'demo']}><ReferralAuths /></ProtectedRoute>} />
+          <Route path="/scheduling" element={<ProtectedRoute allowedRoles={['admin', 'front_office', 'demo']}><Scheduling /></ProtectedRoute>} />
+          <Route path="/rcm" element={<ProtectedRoute allowedRoles={['admin', 'demo']}><RCM /></ProtectedRoute>} />
+          {/* Settings + User Management — admin only, hidden from demo */}
           <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin']}><Settings /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['admin']}><UserManagement /></ProtectedRoute>} />
 
-          {/* DME routes (admin + dme) */}
-          <Route path="/dme/admin" element={<ProtectedRoute allowedRoles={['admin', 'dme']}><DMEAdmin /></ProtectedRoute>} />
-          <Route path="/allowable-rates" element={<ProtectedRoute allowedRoles={['admin', 'dme']}><AllowableRates /></ProtectedRoute>} />
+          {/* DME routes */}
+          <Route path="/dme/admin" element={<ProtectedRoute allowedRoles={['admin', 'dme', 'demo']}><DMEAdmin /></ProtectedRoute>} />
+          <Route path="/allowable-rates" element={<ProtectedRoute allowedRoles={['admin', 'dme', 'demo']}><AllowableRates /></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

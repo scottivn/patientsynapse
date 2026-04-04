@@ -68,16 +68,24 @@ def require_role(*allowed_roles: str):
     """Factory that returns a dependency checking the user's role against allowed roles.
 
     Usage: dependencies=[Depends(require_role("admin", "dme"))]
+
+    The "demo" role is always permitted through role checks — it has universal
+    read access. Write operations are blocked separately by DemoReadOnlyMiddleware.
     """
     async def _check(user: dict = Depends(get_current_user)) -> dict:
-        if user.get("role") not in allowed_roles:
+        role = user.get("role")
+        if role != "demo" and role not in allowed_roles:
             raise HTTPException(status_code=403, detail=f"Requires one of: {', '.join(allowed_roles)}")
         return user
     return _check
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    """Ensure the authenticated user has admin role."""
+    """Ensure the authenticated user has admin role.
+
+    Demo users are excluded — admin-only routes (settings, user management)
+    are not accessible to demo users.
+    """
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user

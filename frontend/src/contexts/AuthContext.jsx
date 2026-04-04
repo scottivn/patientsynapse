@@ -35,8 +35,10 @@ export function AuthProvider({ children }) {
     return user && roles.includes(user.role)
   }, [user])
 
+  const isDemo = user?.role === 'demo'
+
   return (
-    <AuthContext.Provider value={{ user, loading, isAuthenticated: !!user, login, logout, hasRole }}>
+    <AuthContext.Provider value={{ user, loading, isAuthenticated: !!user, isDemo, login, logout, hasRole }}>
       {children}
     </AuthContext.Provider>
   )

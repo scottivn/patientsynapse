@@ -353,6 +353,7 @@ async def get_roles(user: dict = Depends(get_current_user)):
         {"key": "admin", "label": "Admin", "description": "Full access to all features"},
         {"key": "front_office", "label": "Front Office", "description": "Faxes, referrals, referral auths, scheduling"},
         {"key": "dme", "label": "DME", "description": "DME workflow, prescriptions, allowable rates"},
+        {"key": "demo", "label": "Demo", "description": "Read-only access for portfolio demos"},
     ]
 
 

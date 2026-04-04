@@ -90,6 +90,20 @@ def front_office_cookies(front_office_user):
 
 
 @pytest_asyncio.fixture()
+async def demo_user():
+    await _ensure_db()
+    username = f"testdemo_{uuid.uuid4().hex[:8]}"
+    user = await create_user(username, "DemoPass123", "demo")
+    return user
+
+
+@pytest.fixture()
+def demo_cookies(demo_user):
+    token = _make_cookie(demo_user["id"], demo_user["username"], demo_user["role"])
+    return {"access_token": token}
+
+
+@pytest_asyncio.fixture()
 async def client():
     await _ensure_db()
     # Reset login rate limiter between tests to prevent cross-test interference

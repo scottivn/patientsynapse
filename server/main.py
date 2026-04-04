@@ -19,6 +19,7 @@ from server.services.fax_ingestion import FaxIngestionService
 from server.services.prescription_monitor import PrescriptionMonitorService
 from server.auth.users import init_db, seed_default_admin
 from server.auth.audit import AuditMiddleware
+from server.auth.demo import DemoReadOnlyMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -165,6 +166,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
+
+# Demo user read-only enforcement (must be before audit so audit sees the block)
+app.add_middleware(DemoReadOnlyMiddleware)
 
 # HIPAA audit logging middleware
 app.add_middleware(AuditMiddleware)
